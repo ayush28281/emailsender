@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+.emailsender/
+__pycache__/
+*.py[cod]
+.venv/
+*.sqlite*
+*.db
+.pytest_cache/

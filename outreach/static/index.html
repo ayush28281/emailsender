@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f8f8f4">
+  <title>Outreach queue · Emailsender</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="mast">
+    <div class="wrap mast-row">
+      <a href="#queue" class="brand" aria-label="Emailsender home"><span class="brandmark" aria-hidden="true"><i></i></span>Emailsender</a>
+      <nav aria-label="Main navigation">
+        <a href="#queue" id="nav-queue" aria-current="page">Queue</a>
+        <a href="#setup" id="nav-setup">Sender setup</a>
+      </nav>
+      <a href="#setup" class="mailbox-state"><span id="mailbox-dot" class="dot"></span><span id="mailbox-state">Checking mailbox</span></a>
+    </div>
+  </header>
+  <main class="wrap main" id="main" tabindex="-1">
+    <div id="notice" role="status" aria-live="polite" hidden></div>
+    <section id="queue-view" aria-labelledby="queue-title">
+      <div class="page-heading">
+        <div><h1 id="queue-title">Outreach queue</h1><p class="subline" id="worker-state">Loading your workspace…</p></div>
+        <div class="heading-actions">
+          <button type="button" class="button plain" id="refresh"><span aria-hidden="true">↻</span> Refresh</button>
+          <button type="button" class="button outline" id="run"><span aria-hidden="true">▷</span> Run cycle</button>
+        </div>
+      </div>
+      <p id="worker-error" class="error-line" hidden></p>
+      <div id="setup-note" class="setup-note" hidden>
+        <span id="setup-note-text"></span><a href="#setup">Open setup <span aria-hidden="true">↗</span></a>
+      </div>
+      <section class="capture" aria-labelledby="capture-title">
+        <div class="capture-heading"><span class="mail-icon" aria-hidden="true"></span><h2 id="capture-title">Add a recipient</h2></div>
+        <form id="add-form">
+          <div class="address-row">
+            <label class="sr-only" for="new-email">Recipient email address</label>
+            <input type="email" id="new-email" name="email" placeholder="Recipient email address" autocomplete="off" required maxlength="254">
+            <button class="button acid" type="submit">Add to queue <span aria-hidden="true">→</span></button>
+          </div>
+          <details class="context-toggle" id="new-details">
+            <summary>Outreach details <span class="optional">(optional)</span></summary>
+            <div class="context-fields form-grid" id="new-fields"></div>
+          </details>
+          <p id="add-error" class="inline-error" role="alert" hidden></p>
+        </form>
+      </section>
+      <section class="metrics" aria-label="Outreach results">
+        <div><h3>Delivered</h3><p id="m-delivered">—</p><small>Initial emails</small></div>
+        <div><h3>Reply rate</h3><p id="m-reply">—</p><small id="m-reply-detail">Replies / delivered</small></div>
+        <div><h3>Positive reply rate</h3><p id="m-positive">—</p><small id="m-positive-detail">Positive / delivered</small></div>
+        <div><h3>Outcome rate</h3><p id="m-outcome">—</p><small id="m-outcome-detail">Outcomes / delivered</small></div>
+      </section>
+      <section aria-labelledby="contacts-title" class="contacts">
+        <div class="contacts-heading"><div class="list-title"><h2 id="contacts-title">Recipients</h2><span id="contact-count" aria-label="Recipient count">0</span></div>
+          <label class="search"><span class="magnify" aria-hidden="true"></span><span class="sr-only">Search recipients</span><input type="search" id="search" placeholder="Search recipients"></label>
+        </div>
+        <div class="filter-row" aria-label="Recipient filter" role="group">
+          <button type="button" data-filter="all" aria-pressed="true">All recipients</button>
+          <button type="button" data-filter="attention" aria-pressed="false">Needs attention</button>
+          <button type="button" data-filter="replies" aria-pressed="false">Replies</button>
+        </div>
+        <div class="table-wrap">
+          <table id="contact-table" hidden>
+            <thead><tr><th>Recipient</th><th>Scenario</th><th>Status</th><th>Next action</th><th><span class="sr-only">Contact details</span></th></tr></thead>
+            <tbody id="contact-rows"></tbody>
+          </table>
+          <div id="empty" class="empty"><div class="tray" aria-hidden="true"><i></i></div><h3 id="empty-title">Loading recipients…</h3><p id="empty-help"></p></div>
+        </div>
+      </section>
+    </section>
+    <section id="setup-view" aria-labelledby="setup-title" hidden>
+      <div class="page-heading"><div><h1 id="setup-title">Sender setup</h1><p class="subline">Your mailbox, outreach goal and proof of work.</p></div></div>
+      <div class="setup-layout">
+        <section class="panel"><h2>Sender profile</h2><p class="muted">Use details you would be comfortable sending in your own words.</p>
+          <form id="profile-form">
+            <div class="form-grid">
+              <label>Your name<input name="name" required maxlength="120" autocomplete="name"></label>
+              <label>Your role<input name="role" required maxlength="160" placeholder="e.g. Backend engineer"></label>
+              <label class="wide">Default outreach goal<select name="goal" required></select></label>
+              <label class="wide">Relevant skills<input name="skills" maxlength="600" placeholder="e.g. Python, PostgreSQL, API design"></label>
+              <label class="wide">Freelance proposal <span class="hint">Optional</span><textarea name="service_idea" rows="2" maxlength="1000" placeholder="Describe the service you can offer to a potential client."></textarea></label>
+              <label class="wide">Proof of work<textarea name="proof" rows="3" required maxlength="1200" placeholder="Describe a project, your contribution and what it achieved."></textarea></label>
+              <label class="wide">Proof link<input type="url" name="proof_url" required placeholder="https://" maxlength="2048"></label>
+              <label class="wide">Résumé link <span class="hint">Optional</span><input type="url" name="resume_url" maxlength="2048" placeholder="https://"></label>
+              <label class="wide">Call availability <span class="hint">Optional</span><input name="availability" maxlength="500" placeholder="Include two time slots and your time zone"></label>
+              <label class="check wide"><input type="checkbox" name="auto_respond"><span>Send automatic replies<small>Answer clear résumé requests, experience questions and declines using this profile. Calls and other replies stay in your queue for review.</small></span></label>
+            </div>
+            <p class="inline-error" id="profile-error" role="alert" hidden></p>
+            <button type="submit" class="button dark save">Save profile</button>
+          </form>
+        </section>
+        <aside class="panel mailbox-panel"><div class="section-label"><span class="mail-icon" aria-hidden="true"></span><h2>Sending mailbox</h2></div>
+          <p id="setup-mailbox-state" class="mail-summary">Checking configuration…</p>
+          <p>Connect your mailbox to send messages and check for replies. Keep the app running for scheduled follow-ups.</p>
+          <details id="mailbox-connect"><summary class="button outline" id="mailbox-connect-label">Connect mailbox</summary>
+            <form id="mailbox-form" autocomplete="off">
+              <label>Sender email address<input name="address" type="email" required autocomplete="off" maxlength="254"></label>
+              <label>App password<input name="password" type="password" required autocomplete="off" maxlength="2048"></label>
+              <details class="provider"><summary>Provider settings</summary>
+                <p>Gmail uses the defaults below. Enter your provider’s TLS settings for another mailbox.</p>
+                <label>SMTP host<input name="smtp_host" placeholder="smtp.gmail.com" value="smtp.gmail.com" maxlength="253"></label>
+                <label>SMTP port<input name="smtp_port" type="number" min="1" max="65535" value="465"></label>
+                <label>IMAP host<input name="imap_host" placeholder="imap.gmail.com" value="imap.gmail.com" maxlength="253"></label>
+                <label>IMAP port<input name="imap_port" type="number" min="1" max="65535" value="993"></label>
+              </details>
+              <p class="inline-error" id="mailbox-error" role="alert" hidden></p>
+              <button type="submit" class="button dark">Test and connect</button>
+            </form>
+          </details>
+          <details class="env-help"><summary>Configure with an environment file</summary>
+            <p>Copy <code>.env.example</code> to <code>.env</code>. Set <code>EMAILSENDER_ADDRESS</code>, <code>EMAILSENDER_PASSWORD</code> and your provider settings, then restart the app.</p>
+          </details>
+        </aside>
+      </div>
+      <section class="quit-row" aria-label="Local app controls">
+        <p>Quitting stops automatic sending and reply checks on this computer.</p>
+        <button type="button" class="button outline" id="quit">Quit local app</button>
+      </section>
+    </section>
+    <section id="stopped-view" hidden aria-labelledby="stopped-title">
+      <h1 id="stopped-title">Local app stopped</h1>
+      <p class="subline">Run <strong>Start Emailsender.cmd</strong> or <code>python -m outreach --open</code> to restart the dashboard and sender.</p>
+    </section>
+  </main>
+  <dialog id="detail" aria-labelledby="detail-title">
+    <div class="dialog-head"><div><div id="detail-status"></div><h2 id="detail-title">Recipient details</h2><p class="muted" id="detail-company"></p></div>
+      <button class="icon-button" aria-label="Close details" id="close-detail" type="button">×</button>
+    </div>
+    <div class="dialog-body" id="detail-body"></div>
+    <p id="detail-feedback" role="status" class="dialog-feedback" hidden></p>
+  </dialog>
+</body>
+</html>
