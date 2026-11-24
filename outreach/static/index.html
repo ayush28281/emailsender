@@ -8,7 +8,11 @@
   <title>Outreach queue · Emailsender</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/work-samples.css">
+  <script src="/static/work-samples.js" defer></script>
+  <link rel="stylesheet" href="/static/jobs.css">
   <script src="/static/app.js" defer></script>
+  <script src="/static/jobs.js" defer></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -17,6 +21,7 @@
       <a href="#queue" class="brand" aria-label="Emailsender home"><span class="brandmark" aria-hidden="true"><i></i></span>Emailsender</a>
       <nav aria-label="Main navigation">
         <a href="#queue" id="nav-queue" aria-current="page">Queue</a>
+        <a href="#jobs" id="nav-jobs">Jobs</a>
         <a href="#setup" id="nav-setup">Sender setup</a>
       </nav>
       <a href="#setup" class="mailbox-state"><span id="mailbox-dot" class="dot"></span><span id="mailbox-state">Checking mailbox</span></a>
@@ -79,6 +84,31 @@
         </div>
       </section>
     </section>
+    <section id="jobs-view" aria-labelledby="jobs-title" hidden>
+      <div class="page-heading">
+        <div><h1 id="jobs-title">Job tracker</h1><p class="subline">Track applications, interviews and your next steps.</p></div>
+        <button type="button" class="button dark" id="add-job">Add a job <span aria-hidden="true">+</span></button>
+      </div>
+      <section class="job-actions" aria-labelledby="next-steps-title">
+        <h2 id="next-steps-title">Next steps</h2>
+        <ul id="job-actions"></ul>
+        <p id="job-actions-empty" hidden></p>
+      </section>
+      <section class="job-list" aria-labelledby="job-list-title">
+        <div class="contacts-heading">
+          <div class="list-title"><h2 id="job-list-title">Applications</h2><span id="job-count" class="job-count"></span></div>
+          <label class="search"><span class="magnify" aria-hidden="true"></span><span class="sr-only">Search jobs</span><input type="search" id="job-search" placeholder="Search jobs"></label>
+        </div>
+        <div class="filter-row" id="job-filters" aria-label="Application filter" role="group"></div>
+        <div class="table-wrap">
+          <table id="job-table" hidden>
+            <thead><tr><th scope="col">Role</th><th scope="col">Stage</th><th scope="col">Next step</th><th scope="col">Outreach</th><th scope="col"><span class="sr-only">Job details</span></th></tr></thead>
+            <tbody id="job-rows"></tbody>
+          </table>
+          <div class="empty" id="job-empty"><h3>Loading applications…</h3><p></p></div>
+        </div>
+      </section>
+    </section>
     <section id="setup-view" aria-labelledby="setup-title" hidden>
       <div class="page-heading"><div><h1 id="setup-title">Sender setup</h1><p class="subline">Save your details once. New messages use your profile and work sample.</p></div><a class="button outline" id="setup-queue" href="#queue" hidden>Open queue <span aria-hidden="true">→</span></a></div>
       <div class="setup-layout">
@@ -90,10 +120,18 @@
               <label class="wide">Default outreach goal<select name="goal" required></select></label>
               <label class="wide">Relevant skills<input name="skills" maxlength="600" placeholder="e.g. Python, PostgreSQL, API design"></label>
               <label class="wide">Freelance proposal <span class="hint">Optional</span><textarea name="service_idea" rows="2" maxlength="1000" placeholder="Describe the service you can offer to a potential client."></textarea></label>
-              <label class="wide">Proof of work<textarea name="proof" rows="3" required maxlength="1200" placeholder="Describe a project, your contribution and what it achieved."></textarea></label>
-              <label class="wide">Proof link<input type="url" name="proof_url" required placeholder="https://" maxlength="2048"></label>
+              <label class="wide">Default work sample<textarea name="proof" rows="3" required maxlength="1200" placeholder="Describe a project, your contribution and what it achieved."></textarea></label>
+              <label class="wide">Default work sample link<input type="url" name="proof_url" required placeholder="https://" maxlength="2048"></label>
+              <details class="sample-library wide" id="sample-library">
+                <summary>Additional work samples <span class="hint">Optional</span></summary>
+                <p class="muted">Save examples for specific roles. Keywords like “data pipelines” or “Figma” help the app choose which example to send.</p>
+                <div id="sample-list"></div>
+                <button type="button" class="button outline" id="sample-add">Add work sample</button>
+                <p class="muted" id="sample-limit" hidden>You’ve added four additional samples.</p>
+              </details>
               <label class="wide">Résumé link <span class="hint">Optional</span><input type="url" name="resume_url" maxlength="2048" placeholder="https://"></label>
               <label class="wide">Call availability <span class="hint">Optional</span><input name="availability" maxlength="500" placeholder="Include two time slots and your time zone"></label>
+              <label class="check wide"><input type="checkbox" name="review_initial"><span>Review first emails<small>New outreach waits for you to review or edit the first email. Follow-ups run automatically after it sends.</small></span></label>
               <label class="check wide"><input type="checkbox" name="auto_respond"><span>Send automatic replies<small>Answer clear résumé requests, experience questions and declines using this profile. Calls and other replies stay in your queue for review.</small></span></label>
             </div>
             <p class="inline-error" id="profile-error" role="alert" hidden></p>
@@ -133,12 +171,60 @@
       <p class="subline">Run <strong>Start Emailsender.cmd</strong> or <code>python -m outreach --open</code> to restart the dashboard and sender.</p>
     </section>
   </main>
+  <template id="sample-template">
+    <fieldset class="saved-sample">
+      <legend>Work sample</legend>
+      <div class="form-grid">
+        <label>Title<input data-field="title" required maxlength="100" placeholder="Inventory dashboard"></label>
+        <label>Matching keywords<input data-field="skills" required maxlength="300" placeholder="React, dashboards, data visualization"></label>
+        <label class="wide">Your contribution<textarea data-field="proof" rows="2" required maxlength="600" placeholder="What did you build and what did it achieve?"></textarea></label>
+        <label class="wide">Public link<input data-field="proof_url" type="url" required maxlength="2048" placeholder="https://"></label>
+      </div>
+      <button type="button" class="button plain remove-sample">Remove sample</button>
+    </fieldset>
+  </template>
   <dialog id="detail" aria-labelledby="detail-title">
     <div class="dialog-head"><div><div id="detail-status"></div><h2 id="detail-title">Recipient details</h2><p class="muted" id="detail-company"></p></div>
       <button class="icon-button" aria-label="Close details" id="close-detail" type="button">×</button>
     </div>
     <div class="dialog-body" id="detail-body"></div>
     <p id="detail-feedback" role="status" class="dialog-feedback" hidden></p>
+  </dialog>
+  <dialog id="job-editor" aria-labelledby="job-editor-title">
+    <div class="dialog-head">
+      <h2 id="job-editor-title">Add a job</h2>
+      <button class="icon-button" aria-label="Close job editor" id="close-job-editor" type="button">×</button>
+    </div>
+    <div class="dialog-body">
+      <form id="job-form">
+        <div class="form-grid">
+          <label>Job title<input name="title" required maxlength="180" autofocus></label>
+          <label>Company<input name="company" required maxlength="180"></label>
+          <label class="wide">Job posting link <span class="hint">Optional</span><input name="posting_url" type="url" placeholder="https://" maxlength="2048"></label>
+          <label>Stage<select name="stage" required></select></label>
+          <label>Next step date <span class="hint">Optional</span><input name="next_date" type="date"></label>
+          <label class="wide">Next step <span class="hint">Optional</span><input name="next_action" maxlength="4000" placeholder="e.g. Tailor my résumé for this role"></label>
+          <label class="wide">Linked outreach contact <span class="hint">Optional</span><select name="contact_id"></select></label>
+          <label class="wide">Notes <span class="hint">Optional</span><textarea name="notes" rows="3" maxlength="4000" placeholder="Interview details, feedback or questions for the team"></textarea></label>
+        </div>
+        <details class="interview-prep" id="interview-prep" hidden>
+          <summary>Prepare for the interview</summary>
+          <ol>
+            <li id="interview-priorities"></li>
+            <li id="interview-star"></li>
+            <li id="interview-question"></li>
+          </ol>
+          <p class="muted">Save your answers and questions in the notes above.</p>
+        </details>
+        <p class="job-progress muted" id="job-progress" hidden></p>
+        <p class="inline-error" id="job-error" role="alert" hidden></p>
+        <div class="detail-actions">
+          <button type="submit" class="button dark">Save job</button>
+          <button type="button" class="button plain" id="clear-job-action" hidden>Clear next step</button>
+          <a class="button outline" id="job-editor-posting" target="_blank" rel="noopener noreferrer" hidden>Open job posting <span aria-hidden="true">↗</span></a>
+        </div>
+      </form>
+    </div>
   </dialog>
 </body>
 </html>

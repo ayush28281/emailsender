@@ -68,6 +68,42 @@ class SequenceTests(unittest.TestCase):
         self.force_due(cid)
         self.assertEqual(self.engine.tick()["sent"], 0)
         self.assertEqual(self.engine.preview(cid)["status"], "completed")
+        history = self.engine.dashboard()["contacts"][0]["followup_history"]
+        self.assertEqual([1, 2], [item["number"] for item in history])
+        self.assertLessEqual(history[0]["sent_at"], history[1]["sent_at"])
+
+    def test_review_holds_until_current_draft_is_approved(self):
+        self.engine.profile["review_initial"] = True
+        contact = self.engine.add(self.contact)
+        cid = contact["id"]
+        self.assertEqual("pending_review", contact["status"])
+        self.assertIsNone(contact["next_due"])
+        self.assertEqual(0, self.engine.tick()["sent"])
+        revised = self.engine.update(cid, {"context": "Your team published a new benchmark."})
+        with self.assertRaisesRegex(ValueError, "draft changed"):
+            self.engine.approve(cid, contact["subject"], contact["body"], contact["review_token"])
+        with self.assertRaises(ValueError):
+            self.engine.approve(cid, "Header\r\nInjection", revised["body"], revised["review_token"])
+        self.assertEqual(0, self.engine.tick()["sent"])
+
+        approved = self.engine.approve(cid, "A benchmark question", "I built a scheduling API.\n\nCould we talk?",
+                                       revised["review_token"])
+        self.assertEqual("ready", approved["status"])
+        self.assertEqual(1, self.engine.tick()["sent"])
+        self.assertEqual(("A benchmark question", "I built a scheduling API.\n\nCould we talk?"),
+                         self.mail.outbox[0][1:3])
+        self.force_due(cid)
+        self.assertEqual(1, self.engine.tick()["sent"])
+        self.assertEqual("Re: A benchmark question", self.mail.outbox[-1][1])
+
+    def test_review_survives_resolving_a_held_contact_and_a_profile_change(self):
+        self.engine.profile["review_initial"] = True
+        contact = self.engine.add({"email": "recipient@gmail.com"})
+        self.assertEqual("needs_context", contact["status"])
+        self.engine.profile["review_initial"] = False
+        filled = self.engine.update(contact["id"], {"company": "Studio", "context": "Your team built a filter."})
+        self.assertEqual("pending_review", filled["status"])
+        self.assertEqual(0, self.engine.tick()["sent"])
 
     def test_calendar_uses_business_days(self):
         start = datetime(2026, 11, 20, 12).astimezone()

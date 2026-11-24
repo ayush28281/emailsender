@@ -1,0 +1,9 @@
+.sample-library { border-block:1px solid var(--line); min-width:0; padding:12px 0 }
+.sample-library summary { font-weight:600 }
+.sample-library summary .hint { font-weight:400 }
+.sample-library p { font-size:13px; margin:8px 0 }
+.sample-library .saved-sample { min-width:0; margin:12px 0; padding:12px; border:1px solid var(--line); border-radius:8px }
+.saved-sample legend { font-weight:600; font-size:13px; padding-inline:5px }
+.saved-sample .remove-sample { padding-inline:0; margin-top:5px; min-height:36px }
+.sample-used { color:var(--muted); font-size:13px; margin:4px 0 9px }
+.sample-used + a { display:inline-block; margin-bottom:8px }

@@ -8,10 +8,10 @@ const goals = {
 const statusLabels = {
   ready: "Ready to send", needs_context: "Needs context", dm_draft: "DM draft",
   waiting: "Awaiting reply", completed: "Completed", replied: "Replied", stopped: "Stopped",
-  suppressed: "Opted out", bounced: "Bounced", uncertain: "Check delivery"
+  suppressed: "Opted out", bounced: "Bounced", uncertain: "Check delivery", pending_review: "Needs review"
 };
-const attention = new Set(["needs_context", "uncertain", "dm_draft"]);
-const stoppable = new Set(["ready", "needs_context", "dm_draft", "waiting", "uncertain"]);
+const attention = new Set(["needs_context", "uncertain", "dm_draft", "pending_review"]);
+const stoppable = new Set(["ready", "needs_context", "dm_draft", "waiting", "uncertain", "pending_review"]);
 let model = {contacts: [], metrics: {}, profile: {}, mailbox: {}, worker: {}};
 let activeFilter = "all";
 let selected = null;
@@ -156,6 +156,7 @@ function statusChip(status) {
 
 function nextAction(contact) {
   if (contact.status === "needs_context") return "Add details";
+  if (contact.status === "pending_review") return "Review first email";
   if (contact.status === "dm_draft") return "Copy draft";
   if (contact.status === "uncertain") return "Check sent mail";
   if (contact.status === "replied") return "Review reply";
@@ -228,6 +229,9 @@ function renderCapture() {
   if (draftDM) {
     el("capture-action").textContent = "Create DM draft";
     el("capture-help").textContent = "We'll prepare a message for you to copy into LinkedIn or X.";
+  } else if (profile.review_initial) {
+    el("capture-action").textContent = "Prepare first email";
+    el("capture-help").textContent = "We'll research the company and open the draft for you to edit and approve.";
   } else if (mailbox.configured) {
     el("capture-action").textContent = "Start outreach";
     el("capture-help").textContent = "We'll research the company and send automatically when there's enough context.";
@@ -265,6 +269,7 @@ function renderState() {
       if (field.type === "checkbox") field.checked = Boolean(value);
       else field.value = value || (key === "goal" ? "founder" : "");
     }
+    workSamples.load(profile.work_samples);
   }
   const delivered = metrics.delivered || 0;
   el("m-delivered").textContent = delivered;
@@ -272,6 +277,7 @@ function renderState() {
   setMetric("m-positive", metrics.positive_rate, "positive", metrics.positive, delivered);
   setMetric("m-outcome", metrics.outcome_rate, "outcomes", metrics.outcomes, delivered);
   renderContacts();
+  window.dispatchEvent(new CustomEvent("dashboard:render", {detail: model}));
 }
 
 async function refresh() {
@@ -285,15 +291,18 @@ async function refresh() {
 
 function setView(focus = false) {
   if (stopped) return;
-  const view = location.hash === "#setup" ? "setup" : "queue";
-  for (const name of ["setup", "queue"]) {
+  const titles = {setup: "Sender setup", queue: "Outreach queue", jobs: "Job search"};
+  const hashView = location.hash.slice(1);
+  const view = Object.hasOwn(titles, hashView) ? hashView : "queue";
+  for (const name of Object.keys(titles)) {
     el(name + "-view").hidden = name !== view;
     const nav = el("nav-" + name);
     if (name === view) nav.setAttribute("aria-current", "page");
     else nav.removeAttribute("aria-current");
   }
-  document.title = (view === "setup" ? "Sender setup" : "Outreach queue") + " · Emailsender";
+  document.title = titles[view] + " · Emailsender";
   if (focus) el("main").focus();
+  window.dispatchEvent(new CustomEvent("emailsender:view", {detail: view}));
 }
 
 function section(parent, heading) {
@@ -303,12 +312,12 @@ function section(parent, heading) {
   return part;
 }
 
-function sourceLink(parent, value) {
+function sourceLink(parent, value, title) {
   if (!value) return;
   try {
     const url = new URL(value);
     if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) return;
-    const link = node("a", "View source at " + url.host + " ↗");
+    const link = node("a", title || "View source at " + url.host + " ↗");
     link.href = url.href;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
@@ -353,6 +362,41 @@ function openContact(contact) {
   renderDetail(contact);
   if (!el("detail").open) el("detail").showModal();
   if (contact.status === "needs_context") focusQuestion();
+  if (contact.status === "pending_review") el("review-subject")?.focus();
+}
+
+function reviewEditor(parent, contact) {
+  const part = section(parent, "Review first email");
+  const form = node("form");
+  const fields = node("div", "", "form-grid");
+  const subject = node("label", "Subject", "wide");
+  const title = node("input");
+  title.id = "review-subject";
+  title.name = "subject";
+  title.maxLength = 200;
+  title.required = true;
+  title.value = contact.subject;
+  subject.append(title);
+  const message = node("label", "Message", "wide");
+  const body = node("textarea");
+  body.name = "body";
+  body.rows = 10;
+  body.maxLength = 6000;
+  body.required = true;
+  body.value = contact.body;
+  message.append(body);
+  fields.append(subject, message);
+  const submit = node("button", model.mailbox.configured ? "Approve and queue email" : "Approve draft", "button dark save");
+  submit.type = "submit";
+  const help = model.mailbox.configured
+    ? "The next cycle can send this exact message to " + contact.email + "."
+    : "This message will wait for a connected mailbox.";
+  form.append(fields, node("p", help, "muted prepare-note"), submit);
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+    changeContact(contact.id, "approve", {...formValues(form), review_token: contact.review_token}, submit, "Email approved.");
+  });
+  part.append(form);
 }
 
 function offerCompanyDetails(contact, form, panel) {
@@ -458,8 +502,10 @@ function contactEditor(parent, contact) {
   save.type = "submit";
   if (held) {
     if (!missing.includes("email")) {
-      const help = contact.scenario === "dm" ? "When ready, the DM will be available to copy." :
-        model.mailbox.configured ? "When ready, this email will send automatically." : "Ready emails wait in your queue until you connect a mailbox.";
+      let help = "Ready emails wait in your queue until you connect a mailbox.";
+      if (contact.scenario === "dm") help = "When ready, the DM will be available to copy.";
+      else if (contact.review_required || model.profile.review_initial) help = "When ready, you can review the first email.";
+      else if (model.mailbox.configured) help = "When ready, this email will send automatically.";
       form.append(node("p", help, "muted prepare-note"), save);
     }
   } else {
@@ -489,21 +535,58 @@ function renderDetail(contact) {
   const content = el("detail-body");
   content.replaceChildren();
   if (contact.status === "needs_context") contactEditor(content, contact);
+  else if (contact.status === "pending_review") reviewEditor(content, contact);
   else if (contact.reason) section(content, "Status detail").append(node("p", contact.reason));
+  if (["role", "referral"].includes(contact.scenario) && contact.company && contact.role) {
+    const actions = node("div", "", "detail-actions");
+    const linked = model.jobs?.some(job => job.contact_id === contact.id);
+    const track = node("button", linked ? "View tracked job" : "Track this application", "button outline");
+    track.type = "button";
+    track.addEventListener("click", () => {
+      el("detail").close();
+      location.hash = "jobs";
+      setView();
+      window.dispatchEvent(new CustomEvent("emailsender:track-contact", {detail: contact}));
+    });
+    actions.append(track);
+    content.append(actions);
+  }
   if (contact.created_at || contact.sent_at || contact.replied_at) {
-    const history = section(content, "Contact history");
-    const events = [["Added", contact.created_at], ["Initial email sent", contact.sent_at], ["Reply received", contact.replied_at]];
-    for (const [label, date] of events) {
-      if (date) history.append(node("p", label + " · " + stamp(date)));
+    const timeline = section(content, "Outreach timeline");
+    const events = [["Added", contact.created_at], ["First email sent", contact.sent_at]];
+    for (const followup of contact.followup_history || []) {
+      events.push([followup.number === 1 ? "First follow-up sent" : "Final follow-up sent", followup.sent_at]);
     }
-    if (contact.followups) history.append(node("p", "Follow-ups sent · " + contact.followups));
+    events.push(["Reply received · Follow-ups stopped", contact.replied_at]);
+    const history = node("ol", "", "outreach-timeline");
+    for (const [label, date] of events) {
+      if (!date) continue;
+      const item = node("li");
+      const time = node("time", stamp(date));
+      time.dateTime = date;
+      item.append(node("span", label), time);
+      history.append(item);
+    }
+    if (contact.next_at && contact.status === "waiting") {
+      const item = node("li", "", "timeline-next");
+      const time = node("time", stamp(contact.next_at));
+      time.dateTime = contact.next_at;
+      item.append(node("span", contact.followups ? "Final follow-up due" : "First follow-up due"), time);
+      history.append(item);
+    }
+    timeline.append(history);
   }
   if (contact.context || contact.source) {
     const part = section(content, "Research");
     if (contact.context) part.append(node("p", contact.context));
     sourceLink(part, contact.source);
   }
-  if (contact.body) {
+  if (contact.body && contact.work_sample) {
+    const sample = section(content, "Work sample selected");
+    sample.append(node("p", contact.work_sample.title, "sample-used"));
+    sourceLink(sample, contact.work_sample.proof_url, "Open work sample ↗");
+  }
+  if (contact.body && contact.status !== "pending_review") {
     const part = section(content, contact.status === "dm_draft" ? "Social message draft" : "Initial email");
     if (contact.subject) part.append(node("p", contact.subject, "subject"));
     part.append(node("p", contact.body, "message-copy"));
@@ -528,8 +611,8 @@ function renderDetail(contact) {
     }
   }
   if (contact.auto_response_status) section(content, "Automatic response").append(node("p", pretty(contact.auto_response_status)));
-  if (contact.next_at) section(content, "Next scheduled action").append(node("p", stamp(contact.next_at)));
-  if (["ready", "dm_draft"].includes(contact.status)) contactEditor(content, contact);
+  if (contact.next_at && contact.status !== "waiting") section(content, "Next scheduled action").append(node("p", stamp(contact.next_at)));
+  if (["ready", "dm_draft", "pending_review"].includes(contact.status)) contactEditor(content, contact);
   const outcomePart = section(content, "Outcome");
   const form = node("form", "", "outcome");
   const label = node("label", "Conversation outcome");
@@ -585,6 +668,8 @@ onSubmit("profile-form", "profile-error", async form => {
   const data = formValues(form);
   const finishesSetup = !model.profile.name && model.mailbox.configured;
   data.auto_respond = form.elements.auto_respond.checked;
+  data.review_initial = form.elements.review_initial.checked;
+  data.work_samples = workSamples.values();
   await api("profile", data);
   profileDirty = false;
   await refresh();
@@ -598,7 +683,7 @@ onSubmit("add-form", "add-error", async form => {
   el("new-details").open = false;
   await refresh();
   const latest = model.contacts.find(item => item.id === contact.id) || contact;
-  if (latest.status === "needs_context") {
+  if (["needs_context", "pending_review"].includes(latest.status)) {
     openContact(latest);
   } else {
     notice(latest.status === "dm_draft" ? "DM ready to copy in recipient details." : data.email + " added to your queue.");
@@ -656,6 +741,7 @@ el("quit").addEventListener("click", async event => {
     el("mailbox-form").elements.password.value = "";
     el("setup-view").hidden = true;
     el("queue-view").hidden = true;
+    el("jobs-view").hidden = true;
     el("stopped-view").hidden = false;
     document.querySelector("nav").hidden = true;
     document.querySelector(".mailbox-state").hidden = true;

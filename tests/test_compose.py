@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from outreach import compose, research
+from outreach.settings import validate_profile
 
 
 PROFILE = {
@@ -14,6 +15,8 @@ PROFILE = {
 }
 CONTACT = {"email": "jules@acme.org", "name": "Jules", "company": "Acme",
            "context": "I read your release notes on schema migration prechecks."}
+SAMPLE = {"title": "Warehouse dashboard", "proof": "I built a React dashboard for warehouse inventory",
+          "proof_url": "https://portfolio.example.org/warehouse", "skills": "React, dashboards"}
 
 
 class CompositionTests(unittest.TestCase):
@@ -42,6 +45,46 @@ class CompositionTests(unittest.TestCase):
         for fact in (CONTACT["context"], PROFILE["proof"], PROFILE["proof_url"]):
             self.assertIn(fact, result["body"])
         self.assertEqual(result["body"].count("?"), 1)
+
+    def test_role_and_company_context_select_a_relevant_sample(self):
+        profile = dict(PROFILE, work_samples=[SAMPLE])
+        role = dict(CONTACT, role="React engineer", job_url="https://acme.org/jobs/react")
+        company = dict(CONTACT, context="I read how your team maintains dashboards for retailers.")
+        for contact in (role, company):
+            with self.subTest(contact=contact):
+                result = compose.prepare(profile, contact)
+                self.assertEqual(result["status"], "ready")
+                self.assertEqual(result["work_sample"]["title"], SAMPLE["title"])
+                self.assertIn(SAMPLE["proof"], result["body"])
+                self.assertIn(SAMPLE["proof_url"], result["body"])
+                self.assertNotIn(PROFILE["proof"], result["body"])
+
+    def test_no_match_or_partial_keyword_uses_the_default(self):
+        profile = dict(PROFILE, work_samples=[dict(SAMPLE, skills="Java")])
+        for role in ("JavaScript Engineer", "Customer support associate"):
+            result = compose.prepare(profile, dict(CONTACT, role=role, job_url="https://acme.org/jobs/123"))
+            self.assertEqual(result["work_sample"]["title"], "Default work sample")
+            self.assertIn(PROFILE["proof"], result["body"])
+
+    def test_reviewed_sample_in_reply_still_has_to_exist_in_saved_profile(self):
+        profile = dict(PROFILE, work_samples=[SAMPLE])
+        # Use the example on the sent message, even if separate context no longer matches the tags.
+        sent = dict(CONTACT, work_sample=SAMPLE)
+        question = "Can you tell me more about your experience?"
+        kind, reply = compose.suggest_reply(profile, sent, question)
+        self.assertEqual(kind, "experience")
+        self.assertIn(SAMPLE["proof"], reply)
+        _, reply = compose.suggest_reply(PROFILE, sent, question)
+        self.assertIn(PROFILE["proof"], reply)
+        self.assertNotIn(SAMPLE["proof_url"], reply)
+
+    def test_profile_persists_samples_and_rejects_incomplete_or_oversize_arrays(self):
+        self.assertEqual(validate_profile(PROFILE)["work_samples"], [])
+        self.assertEqual(validate_profile(dict(PROFILE, work_samples=[SAMPLE]))["work_samples"], [SAMPLE])
+        for samples in ({"title": "Wrong shape"}, [SAMPLE] * 5, [dict(SAMPLE, proof="")],
+                        [dict(SAMPLE, proof_url="javascript:void(0)")]):
+            with self.subTest(samples=samples), self.assertRaises(ValueError):
+                validate_profile(dict(PROFILE, work_samples=samples))
 
     def test_address_only_records_attributed_company_context(self):
         evidence = {"company": "Acme", "snippet": "Test migration plans against a production snapshot",

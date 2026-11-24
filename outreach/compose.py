@@ -11,6 +11,7 @@ _HIRING_INBOXES = {"careers", "career", "jobs", "recruiting", "recruitment", "hi
                    "talentacquisition", "talent-acquisition"}
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 _PLACEHOLDER = re.compile(r"\[(?:your |insert |company|name|role|link|project|skill|specific)[^\]]*\]", re.I)
+_SKILL_TOKEN = re.compile(r"[^\W_]+(?:[.+#-][^\W_]+)*(?:\+\+|#)?")
 
 
 def _field(record, key):
@@ -25,6 +26,44 @@ def _web_link(value):
                 and not re.search(r'[\s<>"\\]', value))
     except ValueError:
         return False
+
+
+def _work_examples(profile):
+    default = {"title": "Default work sample", **{
+        key: _field(profile, key) for key in ("proof", "proof_url", "skills")
+    }}
+    samples = [default]
+    for item in profile.get("work_samples") or []:
+        if not isinstance(item, dict):
+            continue
+        sample = {key: _field(item, key) for key in ("title", "proof", "proof_url", "skills")}
+        if (sample["title"] and sample["proof"] and _web_link(sample["proof_url"])
+                and not any(_PLACEHOLDER.search(value) for value in sample.values())):
+            samples.append(sample)
+    return samples
+
+
+def _work_example(samples, contact, *, use_previous=False):
+    if use_previous and isinstance(contact.get("work_sample"), dict):
+        previous = contact["work_sample"]
+        for sample in samples:
+            if all(sample[key] == previous.get(key) for key in ("proof", "proof_url")):
+                return sample
+
+    def tokens(text):
+        return " " + " ".join(_SKILL_TOKEN.findall(text.casefold())) + " "
+
+    fields = [(tokens(_field(contact, key)), weight) for key, weight in (
+        ("role", 4), ("context", 2), ("idea", 1),
+    )]
+
+    def score(sample):
+        keywords = {tokens(tag) for tag in sample["skills"].split(",")}
+        keywords.discard("  ")
+        return sum(weight for phrase, weight in fields if any(tag in phrase for tag in keywords))
+
+    # max keeps the default on a tie and picks the earliest saved match otherwise.
+    return max(samples, key=score)
 
 
 def company_details(contact, draft):
@@ -127,10 +166,12 @@ def prepare(profile: dict, contact: dict, *, research=True) -> dict:
     need_context = not result["context"] and not hiring
     business = not shared_domain(domain)
     lookup_error = ""
+    samples = _work_examples(profile)
     if research and business and (need_job or need_context):
         target = (result["role"] or sender_role) if need_job else ""
         try:
-            details = lookup(domain, target, focus=" ".join((sender_role, skills, proof)))
+            focus = " ".join((sender_role, proof, *(sample["skills"] for sample in samples)))
+            details = lookup(domain, target, focus=focus)
         except ResearchError as exc:
             lookup_error = str(exc) + " "
         else:
@@ -156,11 +197,15 @@ def prepare(profile: dict, contact: dict, *, research=True) -> dict:
         result["source"] = result["job_url"]
 
     company, context, role = result["company"], _sentence(result["context"]), result["role"]
+    sample = _work_example(samples, {**result, "idea": idea if scenario == "freelance" else ""})
+    proof, proof_url = sample["proof"], sample["proof_url"]
+    result["work_sample"] = {key: sample[key] for key in ("title", "proof", "proof_url")}
     greeting = _hello(contact)
     article = "an" if sender_role[:1].lower() in "aeiou" else "a"
     title = sender_role if re.match(r"^(a|an|the) ", sender_role, re.I) else f"{article} {sender_role}"
     intro = f"I work as {title}."
-    if skills:
+    # Additional-sample keywords guide matching. The sample's proof makes the actual claims.
+    if skills and sample is samples[0]:
         intro += f" My focus is {skills.rstrip('.')}."
     evidence = _sentence(proof) + f" You can see the work here: {proof_url}"
     sections = [("your proof of work", "profile", proof), ("the contact observation", "context", context)]
@@ -168,7 +213,7 @@ def prepare(profile: dict, contact: dict, *, research=True) -> dict:
         body = f"{greeting} {context} {_sentence(proof)} Would you be open to connecting?\n\n{name}\n{proof_url}"
         return _finished_draft(result, body, "", sections)
 
-    sections.append(("your skills description", "profile", skills))
+    sections.append(("your skills description", "profile", skills if sample is samples[0] else ""))
     if scenario == "founder":
         subject = f"Building with the team at {company}"
         ask = "Would your team be open to a conversation about where I could contribute?"
@@ -296,8 +341,9 @@ def suggest_reply(profile: dict, contact: dict, text: str) -> tuple[str, str]:
             message = f"Thanks for asking. You can find my résumé here: {resume_url}"
     elif _EXPERIENCE.fullmatch(content):
         kind = "experience"
-        proof, link = _field(profile, "proof"), _field(profile, "proof_url")
-        if proof and _web_link(link):
+        sample = _work_example(_work_examples(profile), contact, use_previous=True)
+        proof, link = sample["proof"], sample["proof_url"]
+        if proof and _web_link(link) and not _PLACEHOLDER.search(proof):
             message = f"{_sentence(proof)} Here’s the project: {link}"
     elif _DECLINE.fullmatch(content):
         kind = "decline"

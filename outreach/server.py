@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .engine import Engine
+from .jobs import JobTracker
 from .mailbox import Mailbox
 from .settings import (
     PROFILE_DEFAULTS, clean_fields, read_json, read_mailbox, save_json,
@@ -26,6 +27,10 @@ ASSETS = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/static/app.css": ("app.css", "text/css; charset=utf-8"),
     "/static/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/static/jobs.css": ("jobs.css", "text/css; charset=utf-8"),
+    "/static/jobs.js": ("jobs.js", "text/javascript; charset=utf-8"),
+    "/static/work-samples.css": ("work-samples.css", "text/css; charset=utf-8"),
+    "/static/work-samples.js": ("work-samples.js", "text/javascript; charset=utf-8"),
 }
 
 
@@ -70,6 +75,7 @@ class Workspace:
         self.worker = None
         self.last_run = self.last_error = ""
         self.engine().close()
+        self.jobs = JobTracker(self.db)
 
     def _bind(self, address):
         current = read_json(self.identity_path, "")
@@ -155,6 +161,7 @@ class Workspace:
     def dashboard(self):
         with closing(self.engine()) as engine:
             result = engine.dashboard()
+        result.update(self.jobs.dashboard())
         metrics = result["metrics"]
         metrics["replies"] = metrics["replied"]
         metrics["positive_rate"] = metrics["positive_reply_rate"] / 100
@@ -177,10 +184,15 @@ class Workspace:
             self.connect(data)
         elif path == "/api/contacts":
             return {"contact": self.add(data)}
+        elif path == "/api/jobs":
+            return {"job": self.jobs.add(data)}
         elif path == "/api/run":
             return self.tick()
         else:
-            match = re.fullmatch(r"/api/contacts/([1-9][0-9]{0,15})/(stop|outcome|update|company-suggestion)", path)
+            job_path = re.fullmatch(r"/api/jobs/([1-9][0-9]{0,15})/update", path)
+            if job_path:
+                return {"job": self.jobs.update(int(job_path[1]), data)}
+            match = re.fullmatch(r"/api/contacts/([1-9][0-9]{0,15})/(stop|outcome|update|company-suggestion|approve)", path)
             if not match:
                 raise LookupError("Unknown endpoint.")
             ident, action = int(match[1]), match[2]
@@ -190,6 +202,10 @@ class Workspace:
                     return {"suggestion": engine.company_suggestion(ident, company)}
                 if action == "stop":
                     engine.stop(ident)
+                elif action == "approve":
+                    contact = engine.approve(ident, data.get("subject"), data.get("body"), data.get("review_token"))
+                    self.wake.set()
+                    return {"contact": contact}
                 elif action == "outcome":
                     value = data.get("value")
                     if value not in ("none", "call", "interview", "other"):

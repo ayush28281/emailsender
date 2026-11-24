@@ -13,8 +13,11 @@ from .mailbox import address
 
 PROFILE_DEFAULTS = {
     "name": "", "role": "", "goal": "founder", "skills": "", "proof": "",
+    "work_samples": [],
     "proof_url": "", "resume_url": "", "availability": "", "service_idea": "", "auto_respond": False,
+    "review_initial": False,
 }
+PROFILE_SWITCHES = {"auto_respond", "review_initial"}
 GOALS = {"founder", "role", "referral", "freelance", "dm"}
 MAIL_ENV = {name: "EMAILSENDER_" + name.upper() for name in
             ("address", "password", "smtp_host", "smtp_port", "imap_host", "imap_port")}
@@ -138,13 +141,29 @@ def clean_fields(data, fields):
 
 
 def validate_profile(data):
-    profile = PROFILE_DEFAULTS | clean_fields(data, PROFILE_DEFAULTS.keys() - {"auto_respond"})
-    if type(data.get("auto_respond", False)) is not bool:
-        raise ValueError("The automatic reply setting must be true or false.")
-    profile["auto_respond"] = data.get("auto_respond", False)
+    profile = PROFILE_DEFAULTS | clean_fields(data, PROFILE_DEFAULTS.keys() - PROFILE_SWITCHES - {"work_samples"})
+    for key in PROFILE_SWITCHES:
+        value = data.get(key, False)
+        if type(value) is not bool:
+            raise ValueError("Use a checkbox to choose the email review and automatic reply settings.")
+        profile[key] = value
     for key in ("name", "role", "proof", "proof_url"):
         if not profile[key]:
             raise ValueError(f"Your profile needs a {key.replace('_', ' ')}.")
     if profile["goal"] not in GOALS:
         raise ValueError("Choose a supported outreach goal.")
+    samples = data.get("work_samples", [])
+    if not isinstance(samples, list) or len(samples) > 4:
+        raise ValueError("Save up to four additional work samples.")
+    limits = {"title": 100, "skills": 300, "proof": 600, "proof_url": 2048}
+    profile["work_samples"] = []
+    for sample in samples:
+        if not isinstance(sample, dict):
+            raise ValueError("Each work sample needs a title, matching keywords, a description, and a link.")
+        cleaned = clean_fields(sample, limits)
+        if any(not cleaned.get(key) or len(cleaned[key]) > limit for key, limit in limits.items()):
+            raise ValueError("Complete all fields within the length limits for each work sample.")
+        if not any(part.strip() for part in cleaned["skills"].split(",")):
+            raise ValueError("Add matching keywords for each work sample.")
+        profile["work_samples"].append(cleaned)
     return profile

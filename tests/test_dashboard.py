@@ -126,6 +126,30 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual(0, self.request("/api/dashboard")[1]["metrics"]["outcomes"])
         self.assertEqual(400, self.request("/api/contacts", {"email": "Reader@gmail.com"})[0])
 
+    def test_track_a_job_and_review_a_linked_first_email(self):
+        profile = {"name": "River", "role": "Designer", "proof": "I built a reading guide.",
+                   "proof_url": "https://example.org/guide", "review_initial": True}
+        self.assertEqual(200, self.request("/api/profile", profile)[0])
+        status, result = self.request("/api/contacts", {"email": "reader@gmail.com", "company": "Bookshop",
+                                      "role": "Designer", "job_url": "https://example.org/openings/designer"})
+        self.assertEqual(200, status)
+        contact = result["contact"]
+        self.assertEqual("pending_review", contact["status"])
+        status, result = self.request("/api/jobs", {"title": "Designer", "company": "Bookshop",
+                                      "posting_url": contact["job_url"], "contact_id": contact["id"]})
+        self.assertEqual(200, status)
+        job_id = result["job"]["id"]
+        self.assertEqual(200, self.request(f"/api/jobs/{job_id}/update",
+                                           {"stage": "interview", "next_action": "Prepare portfolio walkthrough"})[0])
+        _, dashboard = self.request("/api/dashboard")
+        self.assertEqual(1, dashboard["stage_counts"]["interview"])
+        self.assertEqual(contact["id"], dashboard["jobs"][0]["contact_id"])
+        self.assertEqual("pending_review", dashboard["contacts"][0]["status"])
+        status, result = self.request(f'/api/contacts/{contact["id"]}/approve',
+                                      {"subject": "Bookshop portfolio", "body": "Here's the work I'd like to share.",
+                                       "review_token": contact["review_token"]})
+        self.assertEqual(200, status)
+        self.assertEqual("ready", result["contact"]["status"])
 
 if __name__ == "__main__":
     unittest.main()

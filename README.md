@@ -45,6 +45,13 @@ The optional **Send automatic replies** setting can send one in-thread response 
 
 The dashboard tracks contact dates, original messages, follow-ups, replies, and outcomes. Record a call or interview in **Details**. All rates use the number of unique contacts whose initial email was accepted by SMTP, excluding known bounces. This estimates delivery, since mailbox providers do not report inbox placement here.
 
+## Manage your job search
+
+- Open **Jobs** to track openings from saved through applied, interview, and offer. Add the posting link, the next step and its date, and notes. The next-step list brings deadlines and outreach that needs your attention into the same view.
+- From a role or referral email, choose **Track this application** to start a job record with the role, company, posting, and recipient already filled in.
+- In **Sender setup**, add work samples with skill keywords. When a role or company observation matches an additional sample, the app can use that example in the first email. Open the recipient details to see the sample chosen for the draft.
+- Turn on **Review first emails** in **Sender setup** to edit the subject and body of new drafts before approving them. The first email can send after approval. After it sends, the reply and follow-up rules above apply.
+
 ## Local configuration
 
 - Gmail defaults are SMTP over TLS on port 465 and IMAP over TLS on port 993. Other providers can use the **Provider settings** fields if they support password-based SMTP and IMAP. SMTP on other ports, including 587, requires STARTTLS.

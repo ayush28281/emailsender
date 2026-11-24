@@ -53,6 +53,15 @@ def _automatic(kind, profile, suggestion):
     return bool(profile.get("auto_respond") and suggestion and kind in {"resume", "experience", "decline"})
 
 
+def _require_review(draft, required):
+    if required:
+        draft["review_required"] = True
+        if draft["status"] == "ready":
+            draft.update(status="pending_review", reason="Review the first email before it can send.",
+                         review_token=uuid.uuid4().hex)
+    return draft
+
+
 class Engine:
     def __init__(self, db_path, profile, mailbox=None):
         self.profile = dict(profile)
@@ -123,7 +132,7 @@ class Engine:
         """Return copyable company-level details. Reading a suggestion never enrolls a contact."""
         with self._mutex:
             target = self._get(contact_id)
-            if target["status"] not in ("needs_context", "ready", "dm_draft"):
+            if target["status"] not in ("needs_context", "ready", "pending_review", "dm_draft"):
                 return None
             target_raw = json.loads(target["input"])
             domain = target["email"].rsplit("@", 1)[1]
@@ -160,7 +169,7 @@ class Engine:
         with self._mutex:
             if self.db.execute("SELECT 1 FROM contacts WHERE email=?", (raw["email"],)).fetchone():
                 raise ValueError("This address already has an outreach record.")
-        draft = compose.prepare(self.profile, dict(raw))
+        draft = _require_review(compose.prepare(self.profile, dict(raw)), self.profile.get("review_initial"))
         with self._tx() as db:
             try:
                 created = now().isoformat()
@@ -174,7 +183,7 @@ class Engine:
     def update(self, contact_id, contact):
         with self._mutex:
             row = self._get(contact_id)
-            if row["status"] not in ("needs_context", "ready", "dm_draft"):
+            if row["status"] not in ("needs_context", "ready", "pending_review", "dm_draft"):
                 raise ValueError("Only an unsent contact can be edited.")
             previous = json.loads(row["input"])
             raw = _clean_input({**previous, **contact})
@@ -182,21 +191,40 @@ class Engine:
                 raw["reuse_context"] = False
             if raw["email"] != row["email"]:
                 raise ValueError("Add a separate contact for a different address.")
+        saved_draft = json.loads(row["draft"])
         working = dict(raw)
         if not any(key in contact for key in ("company", "context", "source")) and not raw["context"]:
             # Completing another field (e.g. a freelance proposal) should keep
             # the company's already-researched observation and its source.
-            saved = compose.company_details(previous, json.loads(row["draft"]))
+            saved = compose.company_details(previous, saved_draft)
             if saved and "context" in saved:
                 working.update(saved)
-        draft = compose.prepare(self.profile, working)
+        draft = _require_review(compose.prepare(self.profile, working),
+                                saved_draft.get("review_required") or self.profile.get("review_initial"))
         with self._tx() as db:
             current = self._get(contact_id)
-            if current["status"] != row["status"] or current["input"] != row["input"]:
+            if any(current[key] != row[key] for key in ("status", "input", "draft")):
                 raise ValueError("This contact changed. Refresh before editing.")
             db.execute("UPDATE contacts SET input=?,draft=?,status=?,reason=?,next_due=? WHERE id=?",
                        (json.dumps(raw), json.dumps(draft), draft["status"], draft.get("reason", ""),
                         now().isoformat() if draft["status"] == "ready" else None, contact_id))
+            return self._view(self._get(contact_id))
+
+    def approve(self, contact_id, subject, body, token):
+        if not isinstance(subject, str) or not subject.strip() or len(subject) > 200 or not subject.isprintable():
+            raise ValueError("Enter a single-line subject of 200 characters or fewer.")
+        if (not isinstance(body, str) or not body.strip() or len(body) > 6000
+                or any(not c.isprintable() and c not in "\r\n\t" for c in body)):
+            raise ValueError("Enter an email message of 6,000 characters or fewer.")
+        with self._tx() as db:
+            row = self._get(contact_id)
+            draft = json.loads(row["draft"])
+            if row["status"] != "pending_review" or not token or token != draft.get("review_token"):
+                raise ValueError("This draft changed or already left review. Reopen the recipient details.")
+            draft.pop("review_token")
+            draft.update(status="ready", reason="", subject=subject.strip(), body=body.strip())
+            db.execute("UPDATE contacts SET draft=?,status='ready',reason='',next_due=? WHERE id=?",
+                       (json.dumps(draft), now().isoformat(), contact_id))
             return self._view(self._get(contact_id))
 
     def stop(self, contact_id):
@@ -217,7 +245,7 @@ class Engine:
             if len(value) > 180:
                 raise ValueError("Keep the outcome under 180 characters.")
             db.execute("UPDATE contacts SET outcome=? WHERE id=?", (value, contact_id))
-            if value and row["status"] in ("ready", "waiting"):
+            if value and row["status"] in ("ready", "pending_review", "waiting"):
                 db.execute("UPDATE contacts SET status='completed',reason='Outcome recorded.',next_due=NULL WHERE id=?",
                            (contact_id,))
             return self._view(self._get(contact_id))
@@ -225,6 +253,13 @@ class Engine:
     def dashboard(self):
         with self._mutex:
             rows = [self._view(r) for r in self.db.execute("SELECT * FROM contacts ORDER BY id DESC")]
+            followup_times = {}
+            for row in self.db.execute("""SELECT contact_id,stage,created_at FROM attempts
+                WHERE state='accepted' AND stage IN (1,2) ORDER BY created_at"""):
+                followup_times.setdefault(row["contact_id"], []).append(
+                    {"number": row["stage"], "sent_at": row["created_at"]})
+            for contact in rows:
+                contact["followup_history"] = followup_times.get(contact["id"], [])
         delivered = [r for r in rows if r["sent_at"] and r["status"] != "bounced"]
         count = len(delivered)
         replied = sum(bool(r["replied_at"]) for r in delivered)

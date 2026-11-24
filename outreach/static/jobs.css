@@ -1,0 +1,58 @@
+.job-actions {
+  margin-top: 24px;
+  padding: 22px 25px;
+  background: var(--tint);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.job-actions h2 { font-size: 21px }
+.job-actions ul { list-style: none; margin: 3px 0 0; padding: 0 }
+.job-actions li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px 16px;
+  padding: 10px 0;
+}
+.job-actions li + li { border-top: 1px solid #d8e0d3 }
+.job-actions li:last-child { padding-bottom: 0 }
+.job-actions li p { overflow-wrap: anywhere; font-size: 14px }
+.job-actions li small { display: block; color: var(--muted); font-size: 12px }
+.job-actions li button { justify-self: end; text-align: right; white-space: nowrap }
+#job-actions-empty { color: var(--muted); margin-top: 6px; font-size: 14px }
+.job-list { margin-top: 30px }
+.job-count {
+  padding: 3px 7px;
+  background: #e8ede3;
+  border-radius: 6px;
+  color: #4b594d;
+  font-size: 12px;
+}
+.job-title-cell strong { display: block; font-weight: 625 }
+.job-posting { color: var(--green); text-underline-offset: 2px }
+.job-next-date { display: block; font-size: 12px; color: var(--muted) }
+.job-next-date.overdue { color: #79501e; font-weight: 600 }
+.job-progress { margin-top: 12px; font-size: 13px }
+#job-form { margin-top: 15px }
+.interview-prep {
+  padding: 12px 14px;
+  margin-top: 14px;
+  background: var(--tint);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.interview-prep ol { margin: 9px 0; padding-left: 19px }
+.interview-prep li + li { margin-top: 5px }
+.interview-prep p { font-size: 13px }
+@media (max-width:580px) {
+  .job-actions { padding: 16px 18px }
+  .job-actions li { column-gap: 10px }
+  #job-table tr { grid-template-columns: minmax(0, 1fr) auto }
+  #job-table td:nth-child(1) { grid-column: 1; grid-row: 1; font-weight: inherit }
+  #job-table td:nth-child(2) { grid-column: 2; grid-row: 1; text-align: right }
+  #job-table td:nth-child(3) { grid-column: 1; grid-row: 2; text-align: left }
+  #job-table td:nth-child(4) { grid-column: 1; grid-row: 3 }
+  #job-table td:nth-child(5) { grid-column: 2; grid-row: 2 / 4 }
+}
