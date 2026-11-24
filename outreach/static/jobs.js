@@ -2,7 +2,7 @@
   "use strict";
 
   const stages = {saved: "Saved", applied: "Applied", interview: "Interview", offer: "Offer", closed: "Closed"};
-  const filters = {active: "Active", due: "Due", ...stages, all: "All"};
+  const filters = {active: "Active", due: "Due", updates: "Recruiter updates", ...stages, all: "All"};
   const examples = {
     saved: "e.g. Tailor my résumé for this role",
     applied: "e.g. Follow up about my application",
@@ -445,9 +445,11 @@
 
   function renderApplications(jobs, today) {
     const query = el("job-search").value.trim().toLowerCase();
+    const updates = new Set((dashboard.job_suggestions || []).map(item => item.job_id));
     const visible = jobs.filter(job => {
       const stageMatch = filter === "all" || filter === job.stage ||
-        (filter === "active" && job.stage !== "closed") || (filter === "due" && isDue(job, today));
+        (filter === "active" && job.stage !== "closed") || (filter === "due" && isDue(job, today)) ||
+        (filter === "updates" && updates.has(job.id));
       return stageMatch && (job.title + " " + job.company).toLowerCase().includes(query);
     });
     const contacts = new Map((dashboard.contacts || []).map(contact => [contact.id, contact]));
@@ -475,6 +477,7 @@
       }
       const stage = node("td");
       stage.append(node("span", stages[job.stage], "status " + (emphasis[job.stage] || "")));
+      if (updates.has(job.id)) stage.append(node("span", "Update to review", "second-line"));
       const next = node("td");
       if (job.stage !== "closed" && (job.next_action || job.next_date)) {
         next.append(node("span", job.next_action || "Review deadline"));
@@ -510,11 +513,13 @@
     if (!force && currentDisplay === displayKey) return;
     displayKey = currentDisplay;
     const jobs = sortedJobs();
-    const counts = dashboard.stage_counts || {};
+    const counts = {...dashboard.stage_counts,
+      due: jobs.filter(job => isDue(job, today)).length,
+      updates: new Set((dashboard.job_suggestions || []).map(item => item.job_id)).size};
     for (const button of el("job-filters").children) {
       const key = button.dataset.stage;
       button.setAttribute("aria-pressed", String(key === filter));
-      const count = key === "due" ? jobs.filter(job => isDue(job, today)).length : counts[key];
+      const count = counts[key];
       button.textContent = filters[key] + (count ? " " + count : "");
     }
     renderNextSteps(jobs, today);
