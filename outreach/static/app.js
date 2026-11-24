@@ -74,16 +74,28 @@ function addOptions(select, options) {
   for (const [value, label] of Object.entries(options)) select.add(new Option(label, value));
 }
 
-function addFields(container, contact = {}) {
-  const definitions = [
+const contactFields = [
     ["scenario", "Outreach goal", "select", ""], ["name", "Recipient name", "text", ""],
     ["company", "Company", "text", ""], ["role", "Target job title", "text", ""],
     ["context", "Reason for reaching out", "textarea", "What did you notice about the company or its work?"],
     ["source", "Context source", "url", "https://"], ["job_url", "Job listing", "url", "https://"],
     ["idea", "Freelance idea", "textarea", "What would you propose to this business?"]
-  ];
-  for (const [key, title, type, placeholder] of definitions) {
-    const label = node("label", title, type === "textarea" ? "wide" : "");
+];
+const questions = {
+  company: "Which company does this person work for?",
+  context: "What did you notice about this company?",
+  role: "What’s the exact title of the open role?",
+  job_url: "What’s the link to the job opening?",
+  idea: "What would you propose to this business?",
+  source: "Where did you find the company information?",
+  name: "What name should the greeting use?",
+  scenario: "What do you want to contact this person about?"
+};
+
+function addFields(container, contact = {}, keys = contactFields.map(([key]) => key), guided = false) {
+  for (const key of keys) {
+    const [, title, type, placeholder] = contactFields.find(([name]) => name === key);
+    const label = node("label", guided ? questions[key] : title, type === "textarea" || guided ? "wide" : "");
     let field;
     if (type === "select") {
       field = node("select");
@@ -99,14 +111,38 @@ function addFields(container, contact = {}) {
     if (type !== "select") field.maxLength = 2000;
     if (placeholder) field.placeholder = placeholder;
     field.value = contact[key] || (key === "scenario" ? "auto" : "");
+    if (key === "company" || key === "source") {
+      field.addEventListener("input", () => {
+        const check = field.form?.elements.reuse_context;
+        if (check) check.checked = false;
+      });
+    }
     label.append(field);
     container.append(label);
+    if (key === "context") {
+      const share = node("label", "", "wide share-observation");
+      const check = node("input");
+      check.type = "checkbox";
+      check.name = "reuse_context";
+      check.checked = Boolean(contact.reuse_context);
+      const syncShare = () => {
+        check.disabled = !field.value.trim();
+        if (check.disabled) check.checked = false;
+        share.hidden = check.disabled;
+      };
+      field.addEventListener("input", () => { check.checked = false; syncShare(); });
+      field.form?.addEventListener("reset", () => queueMicrotask(syncShare));
+      share.append(check, node("span", "Save this observation for other contacts at this company"));
+      container.append(share);
+      syncShare();
+    }
   }
 }
 
 function formValues(form) {
   const values = {};
   for (const [key, value] of new FormData(form)) values[key] = value.trim();
+  if (form.elements.reuse_context) values.reuse_context = form.elements.reuse_context.checked;
   return values;
 }
 
@@ -139,7 +175,7 @@ function renderContacts() {
   el("contact-table").hidden = !rows.length;
   el("empty").hidden = !!rows.length;
   el("empty-title").textContent = model.contacts.length ? "No matching recipients" : "Your queue is empty";
-  el("empty-help").textContent = model.contacts.length ? "Try another search or filter." : "Add a recipient’s email above to start your first outreach.";
+  el("empty-help").textContent = model.contacts.length ? "Try another search or filter." : "Recipients and their next steps will appear here.";
   const list = el("contact-rows");
   list.replaceChildren();
   for (const contact of rows) {
@@ -153,11 +189,7 @@ function renderContacts() {
     const open = node("button", "Details", "open-row");
     open.type = "button";
     open.setAttribute("aria-label", "Details for " + contact.email);
-    open.addEventListener("click", () => {
-      selected = contact.id;
-      renderDetail(contact);
-      el("detail").showModal();
-    });
+    open.addEventListener("click", () => openContact(contact));
     actions.append(open);
     row.append(person, node("td", goals[contact.scenario] || "Automatic"), status, node("td", nextAction(contact)), actions);
     list.append(row);
@@ -168,6 +200,41 @@ function setMetric(id, rate, title, count, delivered) {
   const percent = Number(rate || 0);
   el(id).textContent = new Intl.NumberFormat(undefined, {style: "percent", maximumFractionDigits: 1}).format(percent);
   el(id + "-detail").textContent = (count || 0) + " " + title + " / " + delivered + " delivered";
+}
+
+function renderCapture() {
+  const {profile, mailbox} = model;
+  const form = el("add-form");
+  const saved = Boolean(profile.name && profile.proof_url);
+  el("capture-title").textContent = saved ? "New outreach" : "Set up your sender profile";
+  el("setup-note").hidden = saved;
+  el("setup-note-text").textContent = mailbox.configured
+    ? "Your mailbox is connected. Add your name and a work sample to personalize your messages."
+    : "Save your name and a work sample, then connect the mailbox you want to send from.";
+  el("sender-summary").hidden = !saved;
+  el("setup-queue").hidden = !saved;
+  form.hidden = !saved;
+  if (!saved) return;
+
+  el("sender-identity").textContent = mailbox.configured
+    ? "Sending as " + profile.name + " (" + mailbox.address + ")"
+    : "Sender profile · " + profile.name;
+  el("sender-goal").textContent = "Default goal · " + (goals[profile.goal] || goals.founder);
+
+  const fields = form.elements;
+  const selectedGoal = fields.scenario.value;
+  const jobOrProposal = [fields.role, fields.job_url, fields.idea].some(field => field.value.trim());
+  const draftDM = selectedGoal === "dm" || (selectedGoal === "auto" && profile.goal === "dm" && !jobOrProposal);
+  if (draftDM) {
+    el("capture-action").textContent = "Create DM draft";
+    el("capture-help").textContent = "We'll prepare a message for you to copy into LinkedIn or X.";
+  } else if (mailbox.configured) {
+    el("capture-action").textContent = "Start outreach";
+    el("capture-help").textContent = "We'll research the company and send automatically when there's enough context.";
+  } else {
+    el("capture-action").textContent = "Queue for sending";
+    el("capture-help").textContent = "We'll prepare the email now. Ready emails send automatically after you connect your mailbox in Sender setup.";
+  }
 }
 
 function renderState() {
@@ -185,12 +252,7 @@ function renderState() {
     }
   }
   mailForm.elements.address.readOnly = connected;
-  const setupParts = [];
-  if (!profile.name || !profile.proof_url) setupParts.push("save your sender profile");
-  if (!connected) setupParts.push("connect a mailbox");
-  el("setup-note").hidden = !setupParts.length;
-  const sentence = setupParts.join(" and ");
-  el("setup-note-text").textContent = sentence ? sentence[0].toUpperCase() + sentence.slice(1) + " to enable automatic sending." : "";
+  renderCapture();
   const last = stamp(worker.last_run);
   el("worker-state").textContent = (worker.running ? "Worker running" : "Worker idle") + (last ? " · Last cycle " + last : " · No completed cycle yet");
   el("worker-error").textContent = worker.last_error || "";
@@ -269,14 +331,154 @@ async function changeContact(id, action, data, button, success) {
     await refresh();
     if (selected === id && el("detail").open) {
       const contact = model.contacts.find(item => item.id === id);
-      if (contact) renderDetail(contact);
+      if (contact) {
+        renderDetail(contact);
+        if (action === "update" && contact.status === "needs_context") focusQuestion();
+      }
       feedback(success);
     }
   } catch (error) {
-    feedback(error.message, true);
+    if (selected === id && el("detail").open) feedback(error.message, true);
   } finally {
     button.disabled = false;
   }
+}
+
+function focusQuestion() {
+  el("detail-body").querySelector(".needed-fields input, .needed-fields select, .needed-fields textarea, .profile-fix")?.focus();
+}
+
+function openContact(contact) {
+  selected = contact.id;
+  renderDetail(contact);
+  if (!el("detail").open) el("detail").showModal();
+  if (contact.status === "needs_context") focusQuestion();
+}
+
+function offerCompanyDetails(contact, form, panel) {
+  const company = form.elements.company;
+  const observation = form.elements.context;
+  const source = form.elements.source;
+  let request = 0;
+  let timer;
+  let applied = null;
+
+  async function load(useInput = false) {
+    const version = ++request;
+    const query = company.value.trim();
+    try {
+      const {suggestion} = await api("contacts/" + contact.id + "/company-suggestion", useInput ? {company: query} : {});
+      if (!form.isConnected || version !== request || company.value.trim() !== query || !suggestion) return;
+      if (suggestion.company === query && (!suggestion.context || suggestion.context === observation.value)) return;
+      const heading = node("strong", "Saved details for " + suggestion.company);
+      panel.replaceChildren(heading);
+      if (suggestion.context) panel.append(node("p", suggestion.context));
+      sourceLink(panel, suggestion.source);
+      const use = node("button", "Use saved details", "button outline");
+      use.type = "button";
+      use.addEventListener("click", () => {
+        company.value = suggestion.company;
+        if (suggestion.context) {
+          observation.value = suggestion.context;
+          observation.dispatchEvent(new Event("input", {bubbles: true}));
+          source.value = suggestion.source || "";
+          applied = {context: observation.value, source: source.value};
+        }
+        heading.textContent = "Using saved details for " + suggestion.company;
+        use.remove();
+        feedback("Saved details filled in. Review them before saving.");
+      });
+      panel.append(use);
+      panel.hidden = false;
+    } catch {
+      // Saved information is optional. The editable fields remain usable offline.
+    }
+  }
+  company.addEventListener("input", () => {
+    ++request;
+    panel.hidden = true;
+    clearTimeout(timer);
+    if (applied) {
+      if (observation.value === applied.context) {
+        observation.value = "";
+        observation.dispatchEvent(new Event("input", {bubbles: true}));
+      }
+      if (source.value === applied.source) source.value = "";
+      applied = null;
+    }
+    timer = setTimeout(() => { if (form.isConnected) load(true); }, 300);
+  });
+  for (const field of [observation, source]) {
+    field.addEventListener("input", () => { if (applied) panel.hidden = true; });
+  }
+  load();
+}
+
+function contactEditor(parent, contact) {
+  const held = contact.status === "needs_context";
+  const missing = contact.missing_fields || [];
+  const focused = missing.filter(key => Object.hasOwn(questions, key));
+  const form = node("form", "", "contact-editor");
+  parent.append(form);
+  let suggestionPanel;
+  if (held) {
+    const needed = section(form, "Details needed");
+    if (contact.reason) needed.append(node("p", contact.reason, "muted"));
+    const fields = node("div", "", "form-grid needed-fields");
+    needed.append(fields);
+    addFields(fields, contact, focused, true);
+    if (missing.includes("profile")) {
+      const link = node("a", "Edit sender profile", "profile-fix");
+      link.href = "#setup";
+      link.addEventListener("click", () => el("detail").close());
+      needed.append(link, node("p", "After saving your profile, return to this recipient and choose Prepare again."));
+    }
+    if (missing.includes("email")) {
+      const correct = node("button", "Add corrected address", "button outline");
+      correct.type = "button";
+      correct.addEventListener("click", () => {
+        el("detail").close();
+        el("new-email").value = contact.email;
+        el("new-email").focus();
+        el("new-email").select();
+      });
+      needed.append(correct);
+    }
+    suggestionPanel = node("aside", "", "company-suggestion");
+    suggestionPanel.hidden = true;
+    needed.append(suggestionPanel);
+  }
+  const details = node("details", "", "detail-edit");
+  details.append(node("summary", held ? "Other outreach details" : "Edit outreach details"));
+  const fields = node("div", "", "form-grid");
+  addFields(fields, contact, contactFields.map(([key]) => key).filter(key => !focused.includes(key)));
+  details.append(fields);
+  form.append(details);
+  const save = node("button", held && !focused.length ? "Prepare again" : held ? "Save and continue" : "Save and prepare again", "button dark save");
+  save.type = "submit";
+  if (held) {
+    if (!missing.includes("email")) {
+      const help = contact.scenario === "dm" ? "When ready, the DM will be available to copy." :
+        model.mailbox.configured ? "When ready, this email will send automatically." : "Ready emails wait in your queue until you connect a mailbox.";
+      form.append(node("p", help, "muted prepare-note"), save);
+    }
+  } else {
+    details.append(save);
+  }
+  const initial = formValues(form);
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+    if (save.disabled || missing.includes("email")) return;
+    const values = formValues(form);
+    const changes = Object.fromEntries(Object.entries(values).filter(([key, value]) => initial[key] !== value));
+    if (["context", "source", "company"].some(key => key in changes)) changes.reuse_context = values.reuse_context;
+    changeContact(contact.id, "update", changes, save, "Outreach details updated.");
+  });
+  form.addEventListener("invalid", event => {
+    const disclosure = event.target.closest("details");
+    if (disclosure) disclosure.open = true;
+  }, true);
+  if (held && focused.some(key => key === "company" || key === "context")) offerCompanyDetails(contact, form, suggestionPanel);
 }
 
 function renderDetail(contact) {
@@ -286,7 +488,8 @@ function renderDetail(contact) {
   el("detail-status").replaceChildren(statusChip(contact.status));
   const content = el("detail-body");
   content.replaceChildren();
-  if (contact.reason) section(content, "Status detail").append(node("p", contact.reason));
+  if (contact.status === "needs_context") contactEditor(content, contact);
+  else if (contact.reason) section(content, "Status detail").append(node("p", contact.reason));
   if (contact.created_at || contact.sent_at || contact.replied_at) {
     const history = section(content, "Contact history");
     const events = [["Added", contact.created_at], ["Initial email sent", contact.sent_at], ["Reply received", contact.replied_at]];
@@ -326,23 +529,7 @@ function renderDetail(contact) {
   }
   if (contact.auto_response_status) section(content, "Automatic response").append(node("p", pretty(contact.auto_response_status)));
   if (contact.next_at) section(content, "Next scheduled action").append(node("p", stamp(contact.next_at)));
-  if (["ready", "needs_context", "dm_draft"].includes(contact.status)) {
-    const details = node("details", "", "detail-edit");
-    details.open = contact.status === "needs_context";
-    details.append(node("summary", "Edit outreach details"));
-    const form = node("form");
-    const fields = node("div", "", "form-grid");
-    addFields(fields, contact);
-    const save = node("button", "Save and prepare again", "button dark save");
-    save.type = "submit";
-    form.append(fields, save);
-    form.addEventListener("submit", event => {
-      event.preventDefault();
-      changeContact(contact.id, "update", formValues(form), save, "Outreach details updated.");
-    });
-    details.append(form);
-    content.append(details);
-  }
+  if (["ready", "dm_draft"].includes(contact.status)) contactEditor(content, contact);
   const outcomePart = section(content, "Outcome");
   const form = node("form", "", "outcome");
   const label = node("label", "Conversation outcome");
@@ -390,30 +577,41 @@ function onSubmit(id, errorId, handler) {
 }
 
 addFields(el("new-fields"));
+el("new-fields").addEventListener("input", renderCapture);
+el("add-form").addEventListener("reset", () => queueMicrotask(renderCapture));
 addOptions(el("profile-form").elements.goal, goals);
 el("profile-form").addEventListener("input", () => { profileDirty = true; });
 onSubmit("profile-form", "profile-error", async form => {
   const data = formValues(form);
+  const finishesSetup = !model.profile.name && model.mailbox.configured;
   data.auto_respond = form.elements.auto_respond.checked;
   await api("profile", data);
   profileDirty = false;
   await refresh();
+  if (finishesSetup) location.hash = "queue";
   notice("Sender profile saved.");
 });
 onSubmit("add-form", "add-error", async form => {
   const data = formValues(form);
-  await api("contacts", data);
+  const {contact} = await api("contacts", data);
   form.reset();
   el("new-details").open = false;
   await refresh();
-  notice(data.email + " added to your queue.");
+  const latest = model.contacts.find(item => item.id === contact.id) || contact;
+  if (latest.status === "needs_context") {
+    openContact(latest);
+  } else {
+    notice(latest.status === "dm_draft" ? "DM ready to copy in recipient details." : data.email + " added to your queue.");
+  }
 });
 onSubmit("mailbox-form", "mailbox-error", async form => {
   const data = formValues(form);
+  const finishesSetup = !model.mailbox.configured && model.profile.name;
   try { await api("mailbox", data); }
   finally { form.elements.password.value = ""; }
   el("mailbox-connect").open = false;
   await refresh();
+  if (finishesSetup && !profileDirty) location.hash = "queue";
   notice("Mailbox connected.");
 });
 el("mailbox-connect").addEventListener("toggle", () => {

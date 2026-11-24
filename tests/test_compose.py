@@ -17,6 +17,23 @@ CONTACT = {"email": "jules@acme.org", "name": "Jules", "company": "Acme",
 
 
 class CompositionTests(unittest.TestCase):
+    def test_focused_fields_identify_only_the_applicable_fix(self):
+        shared = dict(CONTACT, email="jules@gmail.com")
+        for profile, contact, expected in (
+            (PROFILE, {"email": shared["email"]}, ["company"]),
+            (PROFILE, dict(shared, context=""), ["context"]),
+            (PROFILE, dict(shared, scenario="referral"), ["role", "job_url"]),
+            (PROFILE, dict(shared, scenario="referral", role="Engineer"), ["job_url"]),
+            (PROFILE, dict(shared, job_url="https://acme.org/jobs/123"), ["role"]),
+            (PROFILE, dict(shared, context="[specific observation]"), ["context"]),
+            (PROFILE, dict(shared, scenario="freelance"), ["idea"]),
+            (dict(PROFILE, proof="Long work example. " * 70), shared, ["profile"]),
+            (PROFILE, dict(shared, email="invalid"), ["email"]),
+            (PROFILE, shared, []),
+        ):
+            with self.subTest(expected=expected, contact=contact):
+                self.assertEqual(compose.prepare(profile, contact)["missing_fields"], expected)
+
     def test_founder_with_saved_context_uses_sender_work(self):
         with patch("outreach.compose.lookup") as lookup:
             result = compose.prepare(PROFILE, CONTACT)

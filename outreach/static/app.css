@@ -35,8 +35,8 @@ nav a[aria-current] { color:var(--ink); border-bottom-color:var(--green) }
 .dot.on { background:#458059 }
 .main { padding-block:39px 58px }
 .main:focus { outline:none }
-.page-heading,.contacts-heading,.heading-actions,.list-title,.section-label,.capture-heading,.dialog-head,.setup-note,.filter-row { display:flex; align-items:center }
-.page-heading,.contacts-heading,.dialog-head,.setup-note { justify-content:space-between; gap:15px }
+.page-heading,.contacts-heading,.heading-actions,.list-title,.section-label,.capture-heading,.dialog-head,.filter-row { display:flex; align-items:center }
+.page-heading,.contacts-heading,.dialog-head { justify-content:space-between; gap:15px }
 h1,h2,h3,p { margin:0 }
 h1 { font:normal clamp(42px,5vw,64px)/1.09 var(--serif); letter-spacing:-.055em }
 h2 { font-size:23px; line-height:1.23; font-weight:625; letter-spacing:-.045em }
@@ -53,12 +53,16 @@ h3 { font-size:17px; line-height:1.35; letter-spacing:-.025em }
 .button.acid:hover { background:#edffb2 }
 .button.dark { color:white; background:var(--green) }
 .button.dark:hover { background:#2d5445 }
-.setup-note { padding:11px 15px; background:#edf0df; border:1px solid #d8dfc4; color:#43503c; border-radius:7px; font-size:13px; margin-top:23px }
-.setup-note a { font-weight:650; text-underline-offset:3px; flex:none }
 .capture { margin-top:24px; padding:23px 26px 18px; color:#f9fbf3; background:var(--green); border-radius:12px }
 .capture-heading { gap:10px; margin-bottom:16px }
 .capture-heading h2 { font-size:21px }
 .capture .mail-icon { color:var(--lime) }
+#setup-note-text { max-width:60ch; margin-bottom:14px; color:#e4eadb }
+.sender-summary { display:flex; align-items:baseline; flex-wrap:wrap; gap:4px 12px; font-size:13px; color:#e4eadb; margin:-6px 0 15px }
+#sender-identity { overflow-wrap:anywhere }
+#sender-goal { padding-left:12px; border-left:1px solid #718e7d }
+.sender-summary a { color:var(--lime); font-weight:600; text-underline-offset:3px }
+#capture-help { margin-top:8px; color:#e4eadb; font-size:13px }
 .address-row { display:flex; gap:9px }
 .address-row input { flex:1; width:auto; background:#fafbf7; color:var(--ink); border:none; height:45px; padding-inline:14px }
 .address-row .button { min-width:142px }
@@ -171,7 +175,6 @@ dialog::backdrop { background:#172b23a6 }
   .capture,.panel { padding:18px }
   .address-row { flex-direction:column }
   .address-row input { flex:auto; width:100% }
-  .setup-note { flex-wrap:wrap; gap:4px; margin-top:16px }
   .metrics { grid-template-columns:repeat(2,minmax(0,1fr)); gap:13px 0; margin:20px 0 24px; padding-block:15px }
   .metrics > div { padding-inline:15px }
   .metrics > div:nth-child(3) { padding-left:0; border-left:0 }
@@ -190,3 +193,13 @@ dialog::backdrop { background:#172b23a6 }
   td:last-child { grid-column:2; grid-row:2/4; text-align:right }
   .dialog-head,.dialog-body { padding-inline:17px }
 }
+.form-grid .share-observation { display:flex; align-items:baseline; gap:8px; font-weight:400; font-size:13px }
+.form-grid .share-observation input { width:15px; height:15px; margin:0; accent-color:var(--green) }
+.contact-editor .form-grid { margin-top:12px }
+.contact-editor .needed-fields:empty { display:none }
+.prepare-note { margin-top:14px; font-size:13px }
+.prepare-note + .save { margin-top:8px }
+.profile-fix { display:inline-block; margin:10px 0 4px }
+.company-suggestion { display:grid; justify-items:start; gap:6px; padding:14px; margin-top:15px; border:1px solid var(--line); border-radius:7px; background:var(--tint) }
+.company-suggestion strong { font-size:14px }
+.company-suggestion .button { min-height:34px; margin-top:4px }

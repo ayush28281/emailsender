@@ -16,7 +16,7 @@ Open **Sender setup** in the dashboard.
 
 1. Save your name, role, outreach goal, a specific contribution you made, and a public link showing that work. Add a résumé link if you want to handle résumé requests. For freelance outreach, you can save a service proposal in your own words.
 2. Choose **Connect mailbox** and enter your sending address and app password. The app tests SMTP and IMAP authentication before saving the connection. Gmail users with two-step verification can use an app password when their account supports it. [Google’s app password instructions](https://support.google.com/mail/answer/185833)
-3. Open **Queue**, enter a recipient’s email, and choose **Add to queue**. A ready email can go out immediately. For a specific opening, referral, or project, expand **Outreach details** to give the app a job link, role title, observation, or proposal.
+3. Open **Queue**, check the sending identity and goal shown above the recipient field, enter the recipient’s email, and choose **Start outreach**. A ready email can go out immediately. For a social DM, the action prepares a copyable draft.
 
 The dashboard runs at [127.0.0.1:8765](http://127.0.0.1:8765/). Keep the process and computer running for inbox checks and scheduled sends. You can close the browser tab. Choose **Quit local app** in Sender setup to stop the worker. On restart, it checks the inbox before processing overdue messages.
 
@@ -33,7 +33,9 @@ The app uses your goal, the recipient’s address, any details you supply, and p
 | LinkedIn or X | The queue prepares a short DM for you to copy into the social platform. |
 | No reply | One threaded check-in is due after four business days. A final check-in is due five business days later. The sequence then closes. Business days are Monday through Friday in the computer’s local time zone. |
 
-An email address can identify a company domain, but it rarely identifies a person’s job. When research cannot establish the relevant facts, **Needs context** shows what to supply. For a personal mailbox such as Gmail, provide the company and your reason for reaching out. A manually supplied job listing or observation is treated as information you checked.
+When research needs more information, the dashboard opens the recipient with a focused question. For instance, a referral with a known company and role may need only the job listing. For a personal mailbox such as Gmail, enter the company so the app can find relevant saved details.
+
+When a company match is available, choose **Use saved details** to fill the form, review the observation, then choose **Save and continue**. You can mark an observation you enter as reusable for that company. A recipient-specific note stays with that contact by default. Once the necessary details are saved, a ready email can go out.
 
 ## Replies and results
 

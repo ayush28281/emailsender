@@ -63,6 +63,31 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual(400, self.request("/api/profile", {"name": "Sender"})[0])
         self.assertEqual(400, self.request("/api/contacts", {"email": "reader@example.com"})[0])
 
+    def test_reuse_preview_leaves_recipient_on_hold_until_user_applies_it(self):
+        self.request("/api/profile", {"name": "River", "role": "Designer", "proof": "I built a reading guide.",
+                                      "proof_url": "https://example.org/guide"})
+        self.request("/api/contacts", {"email": "first@gmail.com", "company": "Bookshop",
+                                       "context": "Your shop publishes an annotated reading list.",
+                                       "source": "https://example.org/list", "reuse_context": True})
+        status, result = self.request("/api/contacts", {"email": "second@gmail.com"})
+        self.assertEqual(200, status)
+        held = result["contact"]
+        self.assertIn("company", held["missing_fields"])
+        path = f'/api/contacts/{held["id"]}'
+        self.assertIsNone(self.request(path + "/company-suggestion", {})[1]["suggestion"])
+        response, result = self.request(path + "/company-suggestion", {"company": "Bookshop"})
+        self.assertEqual(200, response)
+        suggestion = result["suggestion"]
+        self.assertEqual("Bookshop", suggestion["company"])
+        self.assertIn("annotated reading list", suggestion["context"])
+        entry = next(c for c in self.request("/api/dashboard")[1]["contacts"] if c["id"] == held["id"])
+        self.assertEqual("needs_context", entry["status"])
+        self.assertFalse(entry["context"])
+        self.assertEqual(400, self.request(path + "/update", {"reuse_context": "false"})[0])
+        status, result = self.request(path + "/update", suggestion)
+        self.assertEqual(200, status)
+        self.assertEqual("ready", result["contact"]["status"])
+
     def test_profile_through_reply_and_outcome(self):
         fake = TestMailbox()
         profile = {"name": "River", "role": "designer", "proof": "I designed a searchable project archive",

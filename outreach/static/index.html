@@ -33,17 +33,21 @@
         </div>
       </div>
       <p id="worker-error" class="error-line" hidden></p>
-      <div id="setup-note" class="setup-note" hidden>
-        <span id="setup-note-text"></span><a href="#setup">Open setup <span aria-hidden="true">↗</span></a>
-      </div>
       <section class="capture" aria-labelledby="capture-title">
-        <div class="capture-heading"><span class="mail-icon" aria-hidden="true"></span><h2 id="capture-title">Add a recipient</h2></div>
-        <form id="add-form">
+        <div class="capture-heading"><span class="mail-icon" aria-hidden="true"></span><h2 id="capture-title">New outreach</h2></div>
+        <div id="setup-note" hidden>
+          <p id="setup-note-text"></p><a href="#setup" class="button acid">Set up sender <span aria-hidden="true">→</span></a>
+        </div>
+        <div id="sender-summary" class="sender-summary" hidden>
+          <span id="sender-identity"></span><span id="sender-goal"></span><a href="#setup" aria-label="Edit sender setup">Edit</a>
+        </div>
+        <form id="add-form" hidden>
           <div class="address-row">
             <label class="sr-only" for="new-email">Recipient email address</label>
-            <input type="email" id="new-email" name="email" placeholder="Recipient email address" autocomplete="off" required maxlength="254">
-            <button class="button acid" type="submit">Add to queue <span aria-hidden="true">→</span></button>
+            <input type="email" id="new-email" name="email" placeholder="Recipient email address" autocomplete="off" required maxlength="254" aria-describedby="capture-help">
+            <button class="button acid" type="submit" aria-describedby="capture-help"><span id="capture-action">Start outreach</span> <span aria-hidden="true">→</span></button>
           </div>
+          <p id="capture-help"></p>
           <details class="context-toggle" id="new-details">
             <summary>Outreach details <span class="optional">(optional)</span></summary>
             <div class="context-fields form-grid" id="new-fields"></div>
@@ -76,7 +80,7 @@
       </section>
     </section>
     <section id="setup-view" aria-labelledby="setup-title" hidden>
-      <div class="page-heading"><div><h1 id="setup-title">Sender setup</h1><p class="subline">Your mailbox, outreach goal and proof of work.</p></div></div>
+      <div class="page-heading"><div><h1 id="setup-title">Sender setup</h1><p class="subline">Save your details once. New messages use your profile and work sample.</p></div><a class="button outline" id="setup-queue" href="#queue" hidden>Open queue <span aria-hidden="true">→</span></a></div>
       <div class="setup-layout">
         <section class="panel"><h2>Sender profile</h2><p class="muted">Use details you would be comfortable sending in your own words.</p>
           <form id="profile-form">

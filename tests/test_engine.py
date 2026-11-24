@@ -1,3 +1,4 @@
+import json
 import tempfile
 import threading
 import unittest
@@ -140,6 +141,65 @@ class SequenceTests(unittest.TestCase):
         updated = self.engine.update(c["id"], {"context": "I tried the new editor.", "company": "Product", "scenario": "dm"})
         self.assertEqual(updated["status"], "dm_draft")
         self.assertEqual(self.engine.tick()["sent"], 0)
+
+    def test_legacy_contact_exposes_missing_fields_without_lookup_or_mutation(self):
+        from outreach.research import ResearchError
+
+        with patch("outreach.compose.lookup", side_effect=ResearchError("Unavailable")):
+            record = self.engine.add({"email": "team@example.net", "scenario": "referral", "role": "Engineer"})
+        before = json.loads(self.engine._get(record["id"])["draft"])
+        before.pop("missing_fields")
+        self.engine.db.execute("UPDATE contacts SET draft=? WHERE id=?", (json.dumps(before), record["id"]))
+        with patch("outreach.compose.lookup", side_effect=AssertionError("Unexpected research")):
+            contact = self.engine.dashboard()["contacts"][0]
+        self.assertEqual(contact["missing_fields"], ["job_url"])
+        self.assertEqual(json.loads(self.engine._get(record["id"])["draft"]), before)
+
+    def test_company_suggestion_is_opt_in_and_preserves_private_notes(self):
+        saved = self.engine.add(dict(self.contact, source="https://example.net/releases", role="", name="Lin"))
+        target = self.engine.add(dict(self.contact, email="dev@example.net"))
+        self.assertEqual(self.engine.company_suggestion(target["id"]), {"company": "Example"})
+        self.engine.update(saved["id"], {"reuse_context": True})
+        expected = {"company": "Example", "context": self.contact["context"], "source": "https://example.net/releases"}
+        self.assertEqual(self.engine.company_suggestion(target["id"]), expected)
+        self.engine.update(saved["id"], {"context": "I liked your recent talk, Lin."})
+        self.assertEqual(self.engine.company_suggestion(target["id"]), {"company": "Example"})
+
+    def test_partial_repair_keeps_previously_researched_context(self):
+        fact = {"company": "Example", "snippet": "Validate schema migrations before merging a pull request",
+                "source": "https://example.net/", "job_url": ""}
+        with patch("outreach.compose.lookup", return_value=fact):
+            contact = self.engine.add({"email": "lin@example.net", "scenario": "freelance"})
+        self.assertEqual(contact["missing_fields"], ["idea"])
+        with patch("outreach.compose.lookup", side_effect=AssertionError("Unexpected repeat lookup")):
+            fixed = self.engine.update(contact["id"], {"idea": "I can prototype validation for your fixtures."})
+        self.assertEqual(fixed["status"], "ready")
+        self.assertEqual(fixed["context"], contact["context"])
+        self.assertEqual(fixed["source"], fact["source"])
+
+    def test_suggestion_requires_company_for_personal_email_and_excludes_job_details(self):
+        self.engine.add(dict(self.contact, scenario="referral", role="Engineer", job_url="https://example.net/jobs/1",
+                             reuse_context=True))
+        held = self.engine.add({"email": "someone@gmail.com"})
+        self.assertIsNone(self.engine.company_suggestion(held["id"]))
+        self.assertIsNone(self.engine.company_suggestion(held["id"], company="Other"))
+        self.assertEqual(self.engine.company_suggestion(held["id"], company=" EXAMPLE "), {"company": "Example"})
+        self.assertEqual(self.engine.preview(held["id"])["company"], "")
+        self.assertEqual(self.mail.outbox, [])
+
+    def test_exact_domain_research_is_reusable_and_ambiguous_brands_are_held(self):
+        fact = {"company": "Example", "snippet": "New source-controlled release notes for our toolkit",
+                "source": "https://example.net/", "job_url": ""}
+        with patch("outreach.compose.lookup", return_value=fact):
+            existing = self.engine.add({"email": "lin@example.net"})
+            target = self.engine.add({"email": "new@example.net"})
+        self.assertEqual(self.engine.company_suggestion(target["id"]),
+                         {"company": "Example", "context": existing["context"], "source": fact["source"]})
+        self.assertEqual(self.engine.company_suggestion(target["id"], "example.net")["company"], "Example")
+        self.engine.add(dict(self.contact, email="other@example.net", company="Another brand", reuse_context=True))
+        self.assertIsNone(self.engine.company_suggestion(target["id"]))
+        self.assertIsNone(self.engine.company_suggestion(target["id"], "example.net"))
+        self.assertEqual(self.engine.company_suggestion(target["id"], "Another brand")["company"], "Another brand")
 
     def test_disconnected_or_backlogged_inbox_blocks_all_sends(self):
         self.prepare()

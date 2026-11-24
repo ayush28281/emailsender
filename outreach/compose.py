@@ -27,6 +27,29 @@ def _web_link(value):
         return False
 
 
+def company_details(contact, draft):
+    """Select facts from this draft that can be offered to a different recipient."""
+    company = draft.get("company") or contact.get("company")
+    if not company or _PLACEHOLDER.search(company):
+        return None
+    details = {"company": company}
+    if draft.get("scenario") in {"referral", "role"}:
+        return details
+    context, source = draft.get("context", ""), draft.get("source", "")
+    if not context or _PLACEHOLDER.search(context) or (source and not _web_link(source)):
+        return details
+    # An empty input observation and this attributed, first-party quote identify
+    # the original composer's public research, including already-saved drafts.
+    domain = contact["email"].rsplit("@", 1)[1]
+    researched = (not contact.get("context") and context.startswith("Your website mentions “")
+                  and urlsplit(source).hostname in {domain, "www." + domain})
+    if researched or contact.get("reuse_context") is True:
+        details["context"] = context
+        if source:
+            details["source"] = source
+    return details
+
+
 def _sentence(value):
     return value if value.endswith((".", "?", "!", "…", ".”")) else value + "."
 
@@ -36,14 +59,17 @@ def _hello(contact):
     return f"Hi {name}," if name else "Hello,"
 
 
+def _held(result, reason, *fields):
+    return dict(result, reason=reason, missing_fields=list(fields))
+
+
 def _finished_draft(result, body, subject, sections):
     dm = result["scenario"] == "dm"
     words = len(body.split())
     if words > (90 if dm else 180):
-        longest = max(sections, key=lambda field: len(sections[field].split()))
+        label, key, _ = max(sections, key=lambda item: len(item[2].split()))
         target = "90 words or fewer" if dm else "80–150 words"
-        result["reason"] = f"This draft is {words} words. Shorten {longest} and aim for {target}."
-        return result
+        return _held(result, f"This draft is {words} words. Shorten {label} and aim for {target}.", key)
     return dict(result, status="dm_draft" if dm else "ready", subject=subject, body=body)
 
 
@@ -62,10 +88,10 @@ def _scenario(profile, contact):
     return "founder" if goal in {"", "auto"} else goal
 
 
-def prepare(profile: dict, contact: dict) -> dict:
+def prepare(profile: dict, contact: dict, *, research=True) -> dict:
     scenario = _scenario(profile, contact)
     result = {
-        "status": "needs_context", "reason": "", "scenario": scenario,
+        "status": "needs_context", "reason": "", "scenario": scenario, "missing_fields": [],
         "company": _field(contact, "company"), "context": _field(contact, "context"),
         "source": _field(contact, "source"), "role": _field(contact, "role"),
         "job_url": _field(contact, "job_url"), "subject": "", "body": "",
@@ -76,50 +102,58 @@ def prepare(profile: dict, contact: dict) -> dict:
     idea = _field(contact, "idea") or _field(profile, "service_idea")
     try:
         domain = recipient_domain(contact.get("email"))
-        if scenario not in SCENARIOS:
-            raise ResearchError("Choose an outreach goal for this contact.")
-        if not all((name, sender_role, proof, _web_link(proof_url))):
-            raise ResearchError("Save your name, role, a concrete work example, and its public link in your profile.")
-        input_text = [name, sender_role, skills, proof, proof_url, result["context"], result["company"],
-                      result["role"], result["job_url"], _field(contact, "name")]
-        if scenario == "freelance":
-            input_text.append(idea)
-        if any(_PLACEHOLDER.search(value) for value in input_text):
-            raise ResearchError("Replace the template placeholders with your own details.")
-        if result["source"] and not _web_link(result["source"]):
-            raise ResearchError("Enter a full web address for the context source.")
-        hiring = scenario in {"referral", "role"}
-        if hiring and result["job_url"] and not _web_link(result["job_url"]):
-            raise ResearchError("Enter a full web address for the job listing.")
-        if hiring and result["job_url"] and not result["role"]:
-            raise ResearchError("Add the role title from the job listing.")
-        need_job = hiring and not result["job_url"]
-        need_context = not result["context"] and not hiring
-        if (need_job or need_context) and not shared_domain(domain):
-            target = (result["role"] or sender_role) if need_job else ""
+    except ResearchError as exc:
+        return _held(result, str(exc), "email")
+    if scenario not in SCENARIOS:
+        return _held(result, "Choose an outreach goal for this contact.", "scenario")
+    if not all((name, sender_role, proof, _web_link(proof_url))):
+        return _held(result, "Save your name, role, a concrete work example, and its public link in your profile.", "profile")
+    if any(_PLACEHOLDER.search(value) for value in (name, sender_role, skills, proof, proof_url)):
+        return _held(result, "Replace the template placeholders in your sender profile.", "profile")
+    for key in ("context", "company", "role", "job_url", "name"):
+        if _PLACEHOLDER.search(_field(contact, key)):
+            return _held(result, "Replace the template placeholders with your own details.", key)
+    if scenario == "freelance" and _PLACEHOLDER.search(idea):
+        return _held(result, "Replace the placeholder in your freelance proposal.",
+                     "idea" if _field(contact, "idea") else "profile")
+    if result["source"] and not _web_link(result["source"]):
+        return _held(result, "Enter a full web address for the context source.", "source")
+    hiring = scenario in {"referral", "role"}
+    if hiring and result["job_url"] and not _web_link(result["job_url"]):
+        return _held(result, "Enter a full web address for the job listing.", "job_url")
+    if hiring and result["job_url"] and not result["role"]:
+        return _held(result, "Add the role title from the job listing.", "role")
+    need_job = hiring and not result["job_url"]
+    need_context = not result["context"] and not hiring
+    business = not shared_domain(domain)
+    lookup_error = ""
+    if research and business and (need_job or need_context):
+        target = (result["role"] or sender_role) if need_job else ""
+        try:
             details = lookup(domain, target, focus=" ".join((sender_role, skills, proof)))
+        except ResearchError as exc:
+            lookup_error = str(exc) + " "
+        else:
             result["company"] = result["company"] or details["company"]
             if need_job and details["job_url"]:
                 result.update(job_url=details["job_url"], role=target)
             if need_context and details["snippet"]:
                 result["context"] = f'Your website mentions “{details["snippet"]}”.'
                 result["source"] = details["source"]
-        if not result["company"] and not shared_domain(domain):
-            result["company"] = domain
-        if not result["company"]:
-            raise ResearchError("Add the recipient’s company. This address uses a shared email provider.")
-        if hiring and not (result["role"] and result["job_url"]):
-            raise ResearchError("Add the exact role title and a current job listing link.")
-        if need_context and not result["context"]:
-            raise ResearchError("Add one specific observation about the company or its work.")
-        if scenario == "freelance" and not idea:
-            raise ResearchError("Add the specific service or improvement you would propose to this company.")
-        if hiring and not result["context"]:
-            result["context"] = f'I came across the {result["role"]} opening at {result["company"]}.'
-            result["source"] = result["job_url"]
-    except ResearchError as exc:
-        result["reason"] = str(exc)
-        return result
+    if not result["company"] and business:
+        result["company"] = domain
+    if not result["company"]:
+        return _held(result, "Add the recipient’s company. This address uses a shared email provider.", "company")
+    if hiring and not (result["role"] and result["job_url"]):
+        missing = [key for key in ("role", "job_url") if not result[key]]
+        return _held(result, lookup_error + "Add the missing details from the current job listing.", *missing)
+    if need_context and not result["context"]:
+        return _held(result, lookup_error + "Add one specific observation about the company or its work.", "context")
+    if scenario == "freelance" and not idea:
+        return _held(result, "Add the specific service or improvement you would propose to this company.", "idea")
+    if hiring and not result["context"]:
+        result["context"] = f'I came across the {result["role"]} opening at {result["company"]}.'
+        result["source"] = result["job_url"]
 
     company, context, role = result["company"], _sentence(result["context"]), result["role"]
     greeting = _hello(contact)
@@ -129,19 +163,19 @@ def prepare(profile: dict, contact: dict) -> dict:
     if skills:
         intro += f" My focus is {skills.rstrip('.')}."
     evidence = _sentence(proof) + f" You can see the work here: {proof_url}"
-    sections = {"your proof of work": proof, "the contact observation": context}
+    sections = [("your proof of work", "profile", proof), ("the contact observation", "context", context)]
     if scenario == "dm":
         body = f"{greeting} {context} {_sentence(proof)} Would you be open to connecting?\n\n{name}\n{proof_url}"
         return _finished_draft(result, body, "", sections)
 
-    sections["your skills description"] = skills
+    sections.append(("your skills description", "profile", skills))
     if scenario == "founder":
         subject = f"Building with the team at {company}"
         ask = "Would your team be open to a conversation about where I could contribute?"
     elif scenario == "freelance":
         subject = f"A project idea for {company}"
         context += " " + _sentence(idea)
-        sections["the freelance proposal"] = idea
+        sections.append(("the freelance proposal", "idea" if _field(contact, "idea") else "profile", idea))
         ask = "Would it be useful if I sent a short outline of how that could work for your team?"
     elif scenario == "referral":
         subject = f"A referral question about the {role} role at {company}"

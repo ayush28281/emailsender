@@ -39,6 +39,16 @@ def create_mailbox(config):
                    imap_host=config["imap_host"], imap_port=config["imap_port"])
 
 
+def contact_input(data, *, allow_email=False):
+    fields = CONTACT_FIELDS if allow_email else CONTACT_FIELDS - {"email"}
+    contact = clean_fields(data, fields)
+    if "reuse_context" in data:
+        if type(data["reuse_context"]) is not bool:
+            raise ValueError("Choose whether to reuse this observation for this company.")
+        contact["reuse_context"] = data["reuse_context"]
+    return contact
+
+
 class Workspace:
     def __init__(self, folder, interval=60):
         self.folder = Path(folder)
@@ -97,7 +107,7 @@ class Workspace:
     def add(self, data):
         if not self.profile["name"]:
             raise ValueError("Save your sender profile in Sender setup first.")
-        contact = clean_fields(data, CONTACT_FIELDS)
+        contact = contact_input(data, allow_email=True)
         if self.config and contact.get("email", "").casefold() == self.config["address"].casefold():
             raise ValueError("Enter the address of the person you want to contact.")
         with closing(self.engine()) as engine:
@@ -170,11 +180,14 @@ class Workspace:
         elif path == "/api/run":
             return self.tick()
         else:
-            match = re.fullmatch(r"/api/contacts/([1-9][0-9]{0,15})/(stop|outcome|update)", path)
+            match = re.fullmatch(r"/api/contacts/([1-9][0-9]{0,15})/(stop|outcome|update|company-suggestion)", path)
             if not match:
                 raise LookupError("Unknown endpoint.")
             ident, action = int(match[1]), match[2]
             with closing(self.engine()) as engine:
+                if action == "company-suggestion":
+                    company = clean_fields(data, {"company"}).get("company")
+                    return {"suggestion": engine.company_suggestion(ident, company)}
                 if action == "stop":
                     engine.stop(ident)
                 elif action == "outcome":
@@ -183,8 +196,9 @@ class Workspace:
                         raise ValueError("Choose a supported outcome.")
                     engine.outcome(ident, "" if value == "none" else value)
                 else:
-                    engine.update(ident, clean_fields(data, CONTACT_FIELDS - {"email"}))
+                    contact = engine.update(ident, contact_input(data))
                     self.wake.set()
+                    return {"contact": contact}
         return {}
 
 

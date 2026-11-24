@@ -14,6 +14,7 @@ from pathlib import Path
 
 from . import compose
 from .mailbox import Mailbox, SendRejected, address
+from .research import shared_domain
 
 
 def now():
@@ -38,7 +39,12 @@ def _clean_input(data):
     result = {k: str(data.get(k) or "").strip() for k in fields}
     result["scenario"] = result["scenario"] or "auto"
     result["email"] = address(data.get("email") or "")
+    result["reuse_context"] = data.get("reuse_context") is True and bool(result["context"])
     return result
+
+
+def _company_key(value):
+    return " ".join(value.casefold().split())
 
 
 def _automatic(kind, profile, suggestion):
@@ -96,14 +102,58 @@ class Engine:
             raise LookupError("Contact does not exist.")
         return row
 
-    @staticmethod
-    def _view(row):
+    def _view(self, row):
         flat = dict(row)
-        return {**json.loads(flat.pop("input")), **json.loads(flat.pop("draft")), **flat}
+        raw = json.loads(flat.pop("input"))
+        draft = json.loads(flat.pop("draft"))
+        item = {**raw, **draft, **flat}
+        if item["status"] != "needs_context":
+            item["missing_fields"] = []
+        elif "missing_fields" not in draft:
+            # Recover the next prompt for existing queues without running a lookup
+            # or changing a saved draft. A profile edit may already have fixed it.
+            item["missing_fields"] = compose.prepare(self.profile, item, research=False)["missing_fields"]
+        return item
 
     def preview(self, contact_id):
         with self._mutex:
             return self._view(self._get(contact_id))
+
+    def company_suggestion(self, contact_id, company=None):
+        """Return copyable company-level details. Reading a suggestion never enrolls a contact."""
+        with self._mutex:
+            target = self._get(contact_id)
+            if target["status"] not in ("needs_context", "ready", "dm_draft"):
+                return None
+            target_raw = json.loads(target["input"])
+            domain = target["email"].rsplit("@", 1)[1]
+            explicit = _company_key(company if company is not None else target_raw.get("company", ""))
+            shared = shared_domain(domain)
+            if not shared and explicit == domain:
+                explicit = ""
+            if shared and not explicit:
+                return None
+            matches = []
+            for row in self.db.execute("SELECT email,input,draft FROM contacts WHERE id!=? ORDER BY id DESC", (contact_id,)):
+                raw, draft = json.loads(row["input"]), json.loads(row["draft"])
+                other_domain = row["email"].rsplit("@", 1)[1]
+                details = compose.company_details(raw, draft)
+                if not details:
+                    continue
+                same_domain = not shared and other_domain == domain
+                same_company = explicit and _company_key(details["company"]) == explicit
+                if explicit and not same_company:
+                    continue
+                if same_domain or (same_company and (shared or shared_domain(other_domain))):
+                    matches.append(details)
+            # A business domain can service multiple brands. Without an explicit
+            # company, ambiguous domains cannot establish which brand to reuse.
+            names = {_company_key(d["company"]) for d in matches}
+            if len(names) > 1:
+                matches = [d for d in matches if _company_key(d["company"]) != domain]
+            if not matches or len({_company_key(d["company"]) for d in matches}) != 1:
+                return None
+            return next((d for d in matches if "context" in d), matches[0])
 
     def add(self, contact):
         raw = _clean_input(contact)
@@ -126,10 +176,20 @@ class Engine:
             row = self._get(contact_id)
             if row["status"] not in ("needs_context", "ready", "dm_draft"):
                 raise ValueError("Only an unsent contact can be edited.")
-            raw = _clean_input({**json.loads(row["input"]), **contact})
+            previous = json.loads(row["input"])
+            raw = _clean_input({**previous, **contact})
+            if "reuse_context" not in contact and any(raw[k] != previous.get(k, "") for k in ("company", "source", "context")):
+                raw["reuse_context"] = False
             if raw["email"] != row["email"]:
                 raise ValueError("Add a separate contact for a different address.")
-        draft = compose.prepare(self.profile, dict(raw))
+        working = dict(raw)
+        if not any(key in contact for key in ("company", "context", "source")) and not raw["context"]:
+            # Completing another field (e.g. a freelance proposal) should keep
+            # the company's already-researched observation and its source.
+            saved = compose.company_details(previous, json.loads(row["draft"]))
+            if saved and "context" in saved:
+                working.update(saved)
+        draft = compose.prepare(self.profile, working)
         with self._tx() as db:
             current = self._get(contact_id)
             if current["status"] != row["status"] or current["input"] != row["input"]:
