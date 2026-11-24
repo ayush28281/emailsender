@@ -38,6 +38,10 @@
         </div>
       </div>
       <p id="worker-error" class="error-line" hidden></p>
+      <div class="practice-banner" id="practice-banner" hidden>
+        <span><strong>Practice mode is on.</strong> The queue holds outgoing email while you rehearse.</span>
+        <a href="#setup">Sending settings</a>
+      </div>
       <section class="capture" aria-labelledby="capture-title">
         <div class="capture-heading"><span class="mail-icon" aria-hidden="true"></span><h2 id="capture-title">New outreach</h2></div>
         <div id="setup-note" hidden>
@@ -87,8 +91,30 @@
     <section id="jobs-view" aria-labelledby="jobs-title" hidden>
       <div class="page-heading">
         <div><h1 id="jobs-title">Job tracker</h1><p class="subline">Track applications, interviews and your next steps.</p></div>
-        <button type="button" class="button dark" id="add-job">Add a job <span aria-hidden="true">+</span></button>
+        <div class="heading-actions">
+          <button type="button" class="button outline" id="find-jobs" aria-expanded="false" aria-controls="job-discovery">Find jobs</button>
+          <button type="button" class="button dark" id="add-job">Add a job <span aria-hidden="true">+</span></button>
+        </div>
       </div>
+      <section class="panel job-discovery" id="job-discovery" aria-labelledby="job-discovery-title" hidden>
+        <h2 id="job-discovery-title">Search an employer’s openings</h2>
+        <p>Paste a public Greenhouse, Lever or Ashby job board link.</p>
+        <form id="job-discovery-form" class="form-grid">
+          <div class="wide saved-boards" id="saved-boards" hidden>
+            <label>Saved employer boards<select id="board-shortcut"></select></label>
+            <button class="button plain" id="forget-board" type="button" hidden>Remove saved board</button>
+          </div>
+          <label>Employer job board<input name="url" type="url" required maxlength="2048" placeholder="https://jobs.lever.co/company"></label>
+          <label>Search roles <span class="hint">Optional</span><input name="query" maxlength="200" placeholder="e.g. Backend engineer"></label>
+          <div class="wide discovery-actions">
+            <button type="submit" class="button dark">Search board</button>
+            <button type="button" class="button plain" id="remember-board" hidden>Save this board</button>
+          </div>
+        </form>
+        <p class="job-discovery-status muted" id="job-discovery-status" role="status"></p>
+        <p class="inline-error" id="job-discovery-error" role="alert" hidden></p>
+        <ul class="posting-results" id="posting-results" aria-label="Matching openings"></ul>
+      </section>
       <section class="job-actions" aria-labelledby="next-steps-title">
         <h2 id="next-steps-title">Next steps</h2>
         <ul id="job-actions"></ul>
@@ -97,7 +123,10 @@
       <section class="job-list" aria-labelledby="job-list-title">
         <div class="contacts-heading">
           <div class="list-title"><h2 id="job-list-title">Applications</h2><span id="job-count" class="job-count"></span></div>
-          <label class="search"><span class="magnify" aria-hidden="true"></span><span class="sr-only">Search jobs</span><input type="search" id="job-search" placeholder="Search jobs"></label>
+          <div class="job-list-tools">
+            <label class="search"><span class="magnify" aria-hidden="true"></span><span class="sr-only">Search jobs</span><input type="search" id="job-search" placeholder="Search jobs"></label>
+            <a class="button plain" href="/api/jobs/export.csv">Export CSV</a>
+          </div>
         </div>
         <div class="filter-row" id="job-filters" aria-label="Application filter" role="group"></div>
         <div class="table-wrap">
@@ -132,6 +161,7 @@
               <label class="wide">Résumé link <span class="hint">Optional</span><input type="url" name="resume_url" maxlength="2048" placeholder="https://"></label>
               <label class="wide">Call availability <span class="hint">Optional</span><input name="availability" maxlength="500" placeholder="Include two time slots and your time zone"></label>
               <label class="check wide"><input type="checkbox" name="review_initial"><span>Review first emails<small>New outreach waits for you to review or edit the first email. Follow-ups run automatically after it sends.</small></span></label>
+              <label class="check wide"><input type="checkbox" name="practice_mode"><span>Practice mode<small>Pause all outgoing messages while you rehearse. Turning it off lets due emails send.</small></span></label>
               <label class="check wide"><input type="checkbox" name="auto_respond"><span>Send automatic replies<small>Answer clear résumé requests, experience questions and declines using this profile. Calls and other replies stay in your queue for review.</small></span></label>
             </div>
             <p class="inline-error" id="profile-error" role="alert" hidden></p>
@@ -198,15 +228,45 @@
     <div class="dialog-body">
       <form id="job-form">
         <div class="form-grid">
+          <div class="wide posting-import">
+            <label for="job-posting-url">Job posting link <span class="hint">Optional</span></label>
+            <div class="posting-link-row">
+              <input id="job-posting-url" name="posting_url" type="url" placeholder="https://" maxlength="2048">
+              <button type="button" class="button outline" id="job-import">Import posting</button>
+            </div>
+            <p class="muted" id="job-import-status" role="status"></p>
+            <p class="inline-error" id="job-import-error" role="alert" hidden></p>
+          </div>
           <label>Job title<input name="title" required maxlength="180" autofocus></label>
           <label>Company<input name="company" required maxlength="180"></label>
-          <label class="wide">Job posting link <span class="hint">Optional</span><input name="posting_url" type="url" placeholder="https://" maxlength="2048"></label>
           <label>Stage<select name="stage" required></select></label>
           <label>Next step date <span class="hint">Optional</span><input name="next_date" type="date"></label>
           <label class="wide">Next step <span class="hint">Optional</span><input name="next_action" maxlength="4000" placeholder="e.g. Tailor my résumé for this role"></label>
           <label class="wide">Linked outreach contact <span class="hint">Optional</span><select name="contact_id"></select></label>
           <label class="wide">Notes <span class="hint">Optional</span><textarea name="notes" rows="3" maxlength="4000" placeholder="Interview details, feedback or questions for the team"></textarea></label>
         </div>
+        <section id="job-suggestions" class="job-suggestions" aria-label="Recruiter updates" hidden></section>
+        <details class="job-extra" id="job-description-panel">
+          <summary>Role description and fit</summary>
+          <div class="form-grid">
+            <label class="wide">Role description <span class="hint">Optional</span><textarea name="description" rows="5" maxlength="12000" placeholder="Paste the job requirements to compare them with your profile"></textarea></label>
+          </div>
+          <div class="detail-actions"><button type="button" class="button outline" id="job-assess">Check fit</button></div>
+          <p class="inline-error" id="job-assess-error" role="alert" hidden></p>
+          <div id="job-fit" class="job-fit" aria-live="polite" hidden></div>
+        </details>
+        <details class="job-extra" id="job-materials">
+          <summary>Application documents</summary>
+          <div class="form-grid">
+            <label class="wide">Résumé used for this application <span class="hint">Optional</span><input type="url" name="resume_url" maxlength="2048" placeholder="https://"></label>
+            <a class="job-posting" id="job-resume-link" target="_blank" rel="noopener noreferrer" hidden>Open résumé ↗</a>
+            <label class="wide">Cover letter used for this application <span class="hint">Optional</span><input type="url" name="cover_letter_url" maxlength="2048" placeholder="https://"></label>
+            <a class="job-posting" id="job-cover-link" target="_blank" rel="noopener noreferrer" hidden>Open cover letter ↗</a>
+          </div>
+          <div id="job-pdfs"></div>
+          <p class="muted" id="job-pdf-status" role="status"></p>
+          <p class="inline-error" id="job-pdf-error" role="alert" hidden></p>
+        </details>
         <details class="interview-prep" id="interview-prep" hidden>
           <summary>Prepare for the interview</summary>
           <ol>

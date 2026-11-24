@@ -1,6 +1,8 @@
 """Loopback-only web interface and the background mailbox worker."""
 
+import csv
 import hashlib
+import io
 import json
 import logging
 import re
@@ -10,11 +12,13 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from .engine import Engine
 from .jobs import JobTracker
 from .mailbox import Mailbox
+from .materials import MAX_PDF_REQUEST, Materials
+from .postings import discover_board, import_posting, match_profile
 from .settings import (
     PROFILE_DEFAULTS, clean_fields, read_json, read_mailbox, save_json,
     validate_mailbox, validate_profile, write_mailbox,
@@ -32,6 +36,10 @@ ASSETS = {
     "/static/work-samples.css": ("work-samples.css", "text/css; charset=utf-8"),
     "/static/work-samples.js": ("work-samples.js", "text/javascript; charset=utf-8"),
 }
+MATERIAL_PATH = re.compile(r"/api/jobs/([1-9][0-9]{0,15})/materials/(resume|cover_letter)")
+JOB_EXPORT_FIELDS = ("title", "company", "stage", "posting_url", "next_action", "next_date",
+                     "notes", "description", "resume_url", "cover_letter_url",
+                     "created_at", "stage_changed_at", "updated_at")
 
 
 def workspace_key(folder):
@@ -52,6 +60,32 @@ def contact_input(data, *, allow_email=False):
             raise ValueError("Choose whether to reuse this observation for this company.")
         contact["reuse_context"] = data["reuse_context"]
     return contact
+
+
+def application_brief(data, profile):
+    role = clean_fields(data, {"title", "company"})
+    title = role.get("title", "")
+    if not title:
+        raise ValueError("Enter the job title to check your fit.")
+    description = data.get("description", "")
+    if not isinstance(description, str) or not description.strip() or len(description) > 12000:
+        raise ValueError("Add the job description. It can be up to 12,000 characters.")
+    match = match_profile(title, description, profile)
+    heading = title + (f" at {role['company']}" if role.get("company") else "")
+    overlap = ", ".join(match["matched"][:8])
+    lines = [heading]
+    if overlap:
+        lines.append(f"Profile keywords also in the posting\n{overlap}")
+    else:
+        lines.append("Review the posting against your experience and note two concrete examples.")
+    evidence = match["matched_samples"]
+    if evidence:
+        sample = evidence[0]
+        lines.append(f"Work example to lead with\n{sample['title']}\n{sample['proof']}\n{sample['proof_url']}")
+    elif profile["proof"] and profile["proof_url"]:
+        lines.append(f"Default work example to review\n{profile['proof']}\n{profile['proof_url']}")
+    lines.append("Interview prep\nChoose one concrete result from your work. What did you do, what changed, and how did you measure it?")
+    return {"match": match, "brief": "\n\n".join(lines)}
 
 
 class Workspace:
@@ -76,6 +110,7 @@ class Workspace:
         self.last_run = self.last_error = ""
         self.engine().close()
         self.jobs = JobTracker(self.db)
+        self.materials = Materials(self.db)
 
     def _bind(self, address):
         current = read_json(self.identity_path, "")
@@ -90,7 +125,7 @@ class Workspace:
 
     def set_profile(self, data):
         profile = validate_profile(data)
-        with self.lock:
+        with self.cycle_lock, self.lock:
             save_json(self.profile_path, profile)
             self.profile = profile
         self.wake.set()
@@ -122,6 +157,8 @@ class Workspace:
         return item
 
     def tick(self):
+        if self.profile["practice_mode"] and not self.mailbox:
+            return {"sent": 0, "replies": 0, "errors": [], "practice": True}
         if not self.mailbox or not self.profile["name"]:
             raise ValueError("Connect your mailbox and save your sender profile first.")
         if not self.cycle_lock.acquire(blocking=False):
@@ -129,6 +166,10 @@ class Workspace:
         try:
             with closing(self.engine()) as engine:
                 result = engine.tick(stop_requested=self.closing.is_set)
+            if result["replies"]:
+                self.jobs.sync_replies()
+            if self.profile["practice_mode"]:
+                result["practice"] = True
             with self.lock:
                 self.last_run = datetime.now(timezone.utc).isoformat()
                 self.last_error = " ".join(result.get("errors", []))
@@ -162,6 +203,9 @@ class Workspace:
         with closing(self.engine()) as engine:
             result = engine.dashboard()
         result.update(self.jobs.dashboard())
+        materials = self.materials.list_for_jobs()
+        for job in result["jobs"]:
+            job["materials"] = materials.get(job["id"], {})
         metrics = result["metrics"]
         metrics["replies"] = metrics["replied"]
         metrics["positive_rate"] = metrics["positive_reply_rate"] / 100
@@ -184,14 +228,35 @@ class Workspace:
             self.connect(data)
         elif path == "/api/contacts":
             return {"contact": self.add(data)}
+        elif path == "/api/jobs/assess":
+            return application_brief(data, self.profile)
+        elif path in ("/api/postings/import", "/api/postings/discover"):
+            fields = clean_fields(data, {"url", "query"})
+            url = fields.get("url", "")
+            if len(url) > 2048:
+                raise ValueError("The posting or company board URL is too long.")
+            if path == "/api/postings/import":
+                return {"posting": import_posting(url, self.profile)}
+            return {"postings": discover_board(url, self.profile, fields.get("query", ""))}
         elif path == "/api/jobs":
-            return {"job": self.jobs.add(data)}
+            job = self.jobs.add(data)
+            self.jobs.sync_replies()
+            return {"job": job}
         elif path == "/api/run":
             return self.tick()
         else:
+            material_path = MATERIAL_PATH.fullmatch(path)
+            if material_path:
+                return {"material": self.materials.put(int(material_path[1]), material_path[2], data)}
+            suggestion_path = re.fullmatch(r"/api/jobs/([1-9][0-9]{0,15})/suggestions/([1-9][0-9]{0,15})", path)
+            if suggestion_path:
+                job = self.jobs.resolve_suggestion(int(suggestion_path[1]), int(suggestion_path[2]), data.get("action"))
+                return {"job": job}
             job_path = re.fullmatch(r"/api/jobs/([1-9][0-9]{0,15})/update", path)
             if job_path:
-                return {"job": self.jobs.update(int(job_path[1]), data)}
+                job = self.jobs.update(int(job_path[1]), data)
+                self.jobs.sync_replies()
+                return {"job": job}
             match = re.fullmatch(r"/api/contacts/([1-9][0-9]{0,15})/(stop|outcome|update|company-suggestion|approve)", path)
             if not match:
                 raise LookupError("Unknown endpoint.")
@@ -217,6 +282,24 @@ class Workspace:
                     return {"contact": contact}
         return {}
 
+    def messages(self, contact_id):
+        with closing(self.engine()) as engine:
+            return engine.messages(contact_id)
+
+    def export_jobs(self):
+        def spreadsheet_cell(value):
+            value = str(value or "")
+            if value.lstrip().startswith(("=", "+", "-", "@")) or value.startswith(("\t", "\r", "\n")):
+                return "'" + value
+            return value
+
+        file = io.StringIO(newline="")
+        writer = csv.writer(file)
+        writer.writerow(JOB_EXPORT_FIELDS)
+        for job in self.jobs.dashboard()["jobs"]:
+            writer.writerow(spreadsheet_cell(job.get(key)) for key in JOB_EXPORT_FIELDS)
+        return file.getvalue().encode("utf-8-sig")
+
 
 class LocalServer(ThreadingHTTPServer):
     allow_reuse_address = False
@@ -239,13 +322,15 @@ class Handler(BaseHTTPRequestHandler):
             hosts += ("127.0.0.1", "localhost")
         return self.headers.get("Host", "").lower() in hosts
 
-    def _respond(self, status, content_type, content):
+    def _respond(self, status, content_type, content, *, download_name=None):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(content)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        if download_name:
+            self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + quote(download_name, safe=""))
         self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         self.end_headers()
         self.wfile.write(content)
@@ -257,12 +342,28 @@ class Handler(BaseHTTPRequestHandler):
         if not self._local():
             return self._json(403, {"error": "Use the local dashboard address."})
         path = urlsplit(self.path).path
+        if path == "/api/jobs/export.csv":
+            return self._respond(200, "text/csv; charset=utf-8", self.server.workspace.export_jobs(),
+                                 download_name="emailsender-applications.csv")
+        material = MATERIAL_PATH.fullmatch(path)
+        if material:
+            try:
+                name, data = self.server.workspace.materials.get(int(material[1]), material[2])
+                return self._respond(200, "application/pdf", data, download_name=name)
+            except LookupError as exc:
+                return self._json(404, {"error": str(exc)})
         if path == "/api/dashboard":
             try:
                 return self._json(200, self.server.workspace.dashboard())
             except Exception:
                 logging.exception("Could not load dashboard")
                 return self._json(500, {"error": "Could not read the local queue."})
+        match = re.fullmatch(r"/api/contacts/([1-9][0-9]{0,15})/messages", path)
+        if match:
+            try:
+                return self._json(200, self.server.workspace.messages(int(match[1])))
+            except LookupError as exc:
+                return self._json(404, {"error": str(exc)})
         if path in ASSETS:
             name, mime = ASSETS[path]
             return self._respond(200, mime, (STATIC / name).read_bytes())
@@ -278,13 +379,14 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get_content_type() != "application/json":
             return self._json(415, {"error": "Send JSON with Content-Type application/json."})
         try:
+            path = urlsplit(self.path).path
             size = int(self.headers.get("Content-Length", "0"))
-            if size < 0 or size > 65536:
+            limit = MAX_PDF_REQUEST if MATERIAL_PATH.fullmatch(path) else 65536
+            if size < 0 or size > limit:
                 return self._json(413, {"error": "Request body is too large."})
             body = json.loads(self.rfile.read(size))
             if not isinstance(body, dict):
                 raise ValueError("Send a JSON object.")
-            path = urlsplit(self.path).path
             if path == "/api/quit":
                 self.server.workspace.closing.set()
                 self.server.workspace.wake.set()

@@ -4,6 +4,7 @@ import os
 import tempfile
 import threading
 import unittest
+from base64 import b64encode
 from pathlib import Path
 from unittest.mock import patch
 
@@ -150,6 +151,56 @@ class DashboardTest(unittest.TestCase):
                                        "review_token": contact["review_token"]})
         self.assertEqual(200, status)
         self.assertEqual("ready", result["contact"]["status"])
+
+    def test_job_documents_are_downloadable_and_validated(self):
+        _, result = self.request("/api/jobs", {"title": "Designer", "company": "Bookshop"})
+        path = f'/api/jobs/{result["job"]["id"]}/materials/resume'
+        self.assertEqual(404, self.request(path)[0])
+        self.assertEqual(400, self.request(path, {"name": "CV.pdf", "content": "not a pdf"})[0])
+        pdf = b"%PDF-1.4\n% test artifact\n%%EOF\n"
+        status, result = self.request(path, {"name": "Designer CV.pdf", "content": b64encode(pdf).decode("ascii")})
+        self.assertEqual(200, status)
+        self.assertEqual("Designer CV.pdf", result["material"]["name"])
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_port)
+        try:
+            conn.request("GET", path)
+            response = conn.getresponse()
+            self.assertEqual(200, response.status)
+            self.assertTrue(response.getheader("Content-Disposition").startswith("attachment;"))
+            self.assertEqual(pdf, response.read())
+        finally:
+            conn.close()
+        _, dashboard = self.request("/api/dashboard")
+        self.assertEqual({"name": "Designer CV.pdf", "size": len(pdf)}, dashboard["jobs"][0]["materials"]["resume"])
+        self.assertEqual(200, self.request(path, {"remove": True})[0])
+        self.assertEqual(404, self.request(path)[0])
+
+    def test_export_jobs_as_spreadsheet_safe_csv(self):
+        self.assertEqual(200, self.request("/api/jobs", {"title": "=1+1", "company": "Bookshop"})[0])
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_port)
+        try:
+            conn.request("GET", "/api/jobs/export.csv")
+            response = conn.getresponse()
+            self.assertEqual(200, response.status)
+            self.assertIn("attachment", response.getheader("Content-Disposition"))
+            text = response.read().decode("utf-8-sig")
+            self.assertIn("'=1+1,Bookshop,saved", text)
+        finally:
+            conn.close()
+
+    def test_posting_import_discovery_and_grounded_brief(self):
+        profile = {"name": "River", "role": "Designer", "skills": "Figma, illustration",
+                   "proof": "I designed a digital archive.", "proof_url": "https://example.org/guide"}
+        self.assertEqual(200, self.request("/api/profile", profile)[0])
+        posting = {"title": "Designer", "company": "Bookshop", "description": "Create prototypes with Figma."}
+        with patch("outreach.server.import_posting", return_value=posting), patch(
+                "outreach.server.discover_board", return_value=[posting]):
+            self.assertEqual(posting, self.request("/api/postings/import", {"url": "https://example.org/jobs/a"})[1]["posting"])
+            self.assertEqual([posting], self.request("/api/postings/discover", {"url": "https://example.org/jobs"})[1]["postings"])
+        status, result = self.request("/api/jobs/assess", posting)
+        self.assertEqual(200, status)
+        self.assertEqual(["Figma"], result["match"]["matched"])
+        self.assertIn(profile["proof"], result["brief"])
 
 if __name__ == "__main__":
     unittest.main()

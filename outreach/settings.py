@@ -16,8 +16,9 @@ PROFILE_DEFAULTS = {
     "work_samples": [],
     "proof_url": "", "resume_url": "", "availability": "", "service_idea": "", "auto_respond": False,
     "review_initial": False,
+    "practice_mode": False,
 }
-PROFILE_SWITCHES = {"auto_respond", "review_initial"}
+PROFILE_SWITCHES = {"auto_respond", "review_initial", "practice_mode"}
 GOALS = {"founder", "role", "referral", "freelance", "dm"}
 MAIL_ENV = {name: "EMAILSENDER_" + name.upper() for name in
             ("address", "password", "smtp_host", "smtp_port", "imap_host", "imap_port")}
@@ -145,7 +146,7 @@ def validate_profile(data):
     for key in PROFILE_SWITCHES:
         value = data.get(key, False)
         if type(value) is not bool:
-            raise ValueError("Use a checkbox to choose the email review and automatic reply settings.")
+            raise ValueError("Use the checkboxes to choose your sending preferences.")
         profile[key] = value
     for key in ("name", "role", "proof", "proof_url"):
         if not profile[key]:

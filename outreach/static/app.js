@@ -147,7 +147,9 @@ function formValues(form) {
 }
 
 function statusChip(status) {
-  const chip = node("span", statusLabels[status] || pretty(status) || "Pending", "status");
+  const held = status === "ready" && model.profile.practice_mode;
+  const label = held ? "Held in practice" : statusLabels[status] || pretty(status) || "Pending";
+  const chip = node("span", label, "status");
   if (attention.has(status) || status === "bounced") chip.classList.add("status-attention");
   else if (["ready", "waiting"].includes(status)) chip.classList.add("status-active");
   else if (status === "replied") chip.classList.add("status-replied");
@@ -160,6 +162,7 @@ function nextAction(contact) {
   if (contact.status === "dm_draft") return "Copy draft";
   if (contact.status === "uncertain") return "Check sent mail";
   if (contact.status === "replied") return "Review reply";
+  if (model.profile.practice_mode && ["ready", "waiting"].includes(contact.status)) return "Sending paused";
   if (contact.next_at) return stamp(contact.next_at);
   if (contact.status === "ready") return "Next cycle";
   return "—";
@@ -232,6 +235,9 @@ function renderCapture() {
   } else if (profile.review_initial) {
     el("capture-action").textContent = "Prepare first email";
     el("capture-help").textContent = "We'll research the company and open the draft for you to edit and approve.";
+  } else if (profile.practice_mode) {
+    el("capture-action").textContent = "Prepare email";
+    el("capture-help").textContent = "We’ll research the company and prepare the email and follow-ups for rehearsal.";
   } else if (mailbox.configured) {
     el("capture-action").textContent = "Start outreach";
     el("capture-help").textContent = "We'll research the company and send automatically when there's enough context.";
@@ -256,6 +262,7 @@ function renderState() {
     }
   }
   mailForm.elements.address.readOnly = connected;
+  el("practice-banner").hidden = !profile.practice_mode;
   renderCapture();
   const last = stamp(worker.last_run);
   el("worker-state").textContent = (worker.running ? "Worker running" : "Worker idle") + (last ? " · Last cycle " + last : " · No completed cycle yet");
@@ -386,9 +393,10 @@ function reviewEditor(parent, contact) {
   body.value = contact.body;
   message.append(body);
   fields.append(subject, message);
-  const submit = node("button", model.mailbox.configured ? "Approve and queue email" : "Approve draft", "button dark save");
+  const canSend = model.mailbox.configured && !model.profile.practice_mode;
+  const submit = node("button", canSend ? "Approve and queue email" : "Approve draft", "button dark save");
   submit.type = "submit";
-  const help = model.mailbox.configured
+  const help = model.profile.practice_mode ? "Practice mode will hold this email after approval." : canSend
     ? "The next cycle can send this exact message to " + contact.email + "."
     : "This message will wait for a connected mailbox.";
   form.append(fields, node("p", help, "muted prepare-note"), submit);
@@ -397,6 +405,55 @@ function reviewEditor(parent, contact) {
     changeContact(contact.id, "approve", {...formValues(form), review_token: contact.review_token}, submit, "Email approved.");
   });
   part.append(form);
+}
+
+function messageDetails(parent, contact) {
+  const details = node("details", "", "message-log");
+  details.append(node("summary", "Rehearse sequence and view email history"));
+  parent.append(details);
+  let loaded = false;
+  const labels = ["First email", "First follow-up", "Final follow-up", "Automatic reply"];
+  details.addEventListener("toggle", async () => {
+    if (!details.open || loaded) return;
+    loaded = true;
+    const result = node("div");
+    result.append(node("p", "Loading messages…", "muted"));
+    details.append(result);
+    function renderMessage(parent, entry, caption) {
+      const article = node("article", "", "logged-message");
+      article.append(node("h4", labels[entry.stage] || "Email"));
+      if (caption) article.append(node("p", caption, "muted"));
+      if (entry.subject) {
+        article.append(node("p", entry.subject, "subject"), node("pre", entry.body, "message-copy"));
+      } else {
+        article.append(node("p", "Stored timestamp available. This message predates content history.", "muted"));
+      }
+      parent.append(article);
+    }
+    try {
+      const {history, sequence} = await api("contacts/" + contact.id + "/messages");
+      result.replaceChildren(node("h3", "Sequence preview"));
+      if (sequence.length) {
+        const timings = ["When ready and sending is enabled", "4 business days after the first email", "5 business days after the first follow-up"];
+        result.append(node("p", "These previews use your current settings. A reply stops scheduled follow-ups.", "muted"));
+        for (const entry of sequence) renderMessage(result, entry, timings[entry.stage]);
+      } else {
+        result.append(node("p", "An email draft will appear once the recipient details are complete.", "muted"));
+      }
+      result.append(node("h3", "Delivery history"));
+      if (!history.length) result.append(node("p", "No delivery attempts yet.", "muted"));
+      for (const entry of history) {
+        const state = entry.state === "accepted" ? "Accepted by mailbox" : "Delivery needs confirmation";
+        renderMessage(result, entry, state + " · " + stamp(entry.created_at));
+      }
+    } catch (error) {
+      result.replaceChildren(node("p", error.message, "inline-error"));
+      loaded = false;
+      details.addEventListener("toggle", () => {
+        if (!details.open) result.remove();
+      }, {once: true});
+    }
+  });
 }
 
 function offerCompanyDetails(contact, form, panel) {
@@ -505,6 +562,7 @@ function contactEditor(parent, contact) {
       let help = "Ready emails wait in your queue until you connect a mailbox.";
       if (contact.scenario === "dm") help = "When ready, the DM will be available to copy.";
       else if (contact.review_required || model.profile.review_initial) help = "When ready, you can review the first email.";
+      else if (model.profile.practice_mode) help = "Practice mode will hold this email in the queue.";
       else if (model.mailbox.configured) help = "When ready, this email will send automatically.";
       form.append(node("p", help, "muted prepare-note"), save);
     }
@@ -610,6 +668,7 @@ function renderDetail(contact) {
       part.append(node("h3", "Suggested response"), node("p", contact.reply_suggestion, "message-copy"));
     }
   }
+  if (contact.subject || contact.sent_at || contact.status === "uncertain") messageDetails(content, contact);
   if (contact.auto_response_status) section(content, "Automatic response").append(node("p", pretty(contact.auto_response_status)));
   if (contact.next_at && contact.status !== "waiting") section(content, "Next scheduled action").append(node("p", stamp(contact.next_at)));
   if (["ready", "dm_draft", "pending_review"].includes(contact.status)) contactEditor(content, contact);
@@ -669,6 +728,7 @@ onSubmit("profile-form", "profile-error", async form => {
   const finishesSetup = !model.profile.name && model.mailbox.configured;
   data.auto_respond = form.elements.auto_respond.checked;
   data.review_initial = form.elements.review_initial.checked;
+  data.practice_mode = form.elements.practice_mode.checked;
   data.work_samples = workSamples.values();
   await api("profile", data);
   profileDirty = false;
@@ -683,7 +743,7 @@ onSubmit("add-form", "add-error", async form => {
   el("new-details").open = false;
   await refresh();
   const latest = model.contacts.find(item => item.id === contact.id) || contact;
-  if (["needs_context", "pending_review"].includes(latest.status)) {
+  if (["needs_context", "pending_review"].includes(latest.status) || (model.profile.practice_mode && latest.status === "ready")) {
     openContact(latest);
   } else {
     notice(latest.status === "dm_draft" ? "DM ready to copy in recipient details." : data.email + " added to your queue.");
@@ -723,7 +783,9 @@ el("run").addEventListener("click", async event => {
   try {
     const cycle = await api("run", {});
     await refresh();
-    const message = cycle.busy ? "A cycle is already running." : "Cycle complete. Sent " + (cycle.sent || 0) + " · Replies " + (cycle.replies || 0) + ".";
+    const message = cycle.busy ? "A cycle is already running." :
+      cycle.practice ? "Practice mode held outgoing email. Replies checked: " + (cycle.replies || 0) + "." :
+        "Cycle complete. Sent " + (cycle.sent || 0) + " · Replies " + (cycle.replies || 0) + ".";
     notice(model.worker.last_error || message, Boolean(model.worker.last_error));
   } catch (error) { notice(error.message, true); }
   finally { button.disabled = false; }

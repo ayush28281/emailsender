@@ -21,6 +21,9 @@
 .job-actions li button { justify-self: end; text-align: right; white-space: nowrap }
 #job-actions-empty { color: var(--muted); margin-top: 6px; font-size: 14px }
 .job-list { margin-top: 30px }
+.job-list-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; justify-content: flex-end }
+.job-list-tools .search { max-width: 100% }
+.job-list-tools .button { min-height: 34px; padding: 6px 8px; font-size: 13px }
 .job-count {
   padding: 3px 7px;
   background: #e8ede3;
@@ -34,6 +37,54 @@
 .job-next-date.overdue { color: #79501e; font-weight: 600 }
 .job-progress { margin-top: 12px; font-size: 13px }
 #job-form { margin-top: 15px }
+.job-discovery { margin-top: 24px }
+.job-discovery form { margin-top: 15px }
+.job-discovery .form-grid { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) }
+.job-discovery .form-grid > .wide { margin-top: 1px }
+.discovery-actions, .saved-boards { display: flex; align-items: end; flex-wrap: wrap; gap: 8px }
+.saved-boards label { min-width: min(240px, 100%); flex: 1 }
+.job-discovery-status:empty, #job-import-status:empty { display: none }
+.posting-results { list-style: none; padding: 0; margin: 10px 0 0 }
+.posting-results:empty { display: none }
+.posting-results li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 12px 0;
+  overflow-wrap: anywhere;
+  border-top: 1px solid var(--line);
+}
+.posting-results li:last-child { padding-bottom: 0 }
+.posting-results li p { color: var(--muted); font-size: 13px }
+.posting-link-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px }
+.posting-import > .muted { margin-top: 6px; font-size: 13px }
+.job-extra {
+  padding-block: 13px;
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+}
+.job-extra + .job-extra { margin-top: 0 }
+.job-extra .form-grid { margin-top: 10px }
+.job-extra .job-posting { font-size: 13px; margin-top: -8px }
+#job-pdfs, #job-pdf-status:not(:empty) { margin-top: 12px }
+.job-document { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 12px }
+.job-document .detail-actions { margin-top: 7px }
+.job-document .job-posting { margin-top: 0; overflow-wrap: anywhere }
+.job-fit, .job-suggestion {
+  padding: 12px;
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--tint);
+  overflow-wrap: anywhere;
+}
+.job-fit p, .job-suggestion p { font-size: 13px; margin-top: 5px }
+.fit-keywords { font-weight: 600 }
+.fit-brief { margin-top: 12px }
+.fit-brief .message-copy { margin-block: 7px }
+.suggestion-excerpt { white-space: pre-wrap; max-height: 11rem; overflow-y: auto }
 .interview-prep {
   padding: 12px 14px;
   margin-top: 14px;
@@ -47,6 +98,9 @@
 .interview-prep li + li { margin-top: 5px }
 .interview-prep p { font-size: 13px }
 @media (max-width:580px) {
+  .job-list-tools .search { width: min(140px, 100%) }
+  .job-discovery .form-grid { grid-template-columns: 1fr }
+  .posting-link-row .button, .posting-results .button { min-height: 38px; font-size: 12px; padding: 7px 8px }
   .job-actions { padding: 16px 18px }
   .job-actions li { column-gap: 10px }
   #job-table tr { grid-template-columns: minmax(0, 1fr) auto }

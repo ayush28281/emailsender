@@ -48,9 +48,14 @@ The dashboard tracks contact dates, original messages, follow-ups, replies, and 
 ## Manage your job search
 
 - Open **Jobs** to track openings from saved through applied, interview, and offer. Add the posting link, the next step and its date, and notes. The next-step list brings deadlines and outreach that needs your attention into the same view.
+- Choose **Find jobs** to look up openings from public Greenhouse, Lever, or Ashby employer boards. You can filter and save a posting. In the job editor, paste an individual link and choose **Import posting** to review its fields. For other job boards, enter the link and paste the description yourself.
+- Choose **Check fit** in the job editor to see which saved skill keywords appear in the job description and prepare a brief using your own work examples. The check runs locally and compares only the wording in your profile and the posting.
+- Application documents let you keep the résumé and cover letter you used as links or local PDFs up to 5 MiB each. **Export CSV** downloads the tracker records and document links. Saved PDFs are available through the job editor.
 - From a role or referral email, choose **Track this application** to start a job record with the role, company, posting, and recipient already filled in.
+- When a new reply from your linked recruiter clearly identifies an interview, offer, or rejection, **Jobs** can suggest a stage change. Review the quoted evidence and choose whether to apply the update.
 - In **Sender setup**, add work samples with skill keywords. When a role or company observation matches an additional sample, the app can use that example in the first email. Open the recipient details to see the sample chosen for the draft.
 - Turn on **Review first emails** in **Sender setup** to edit the subject and body of new drafts before approving them. The first email can send after approval. After it sends, the reply and follow-up rules above apply.
+- Turn on **Practice mode** in **Sender setup** to pause all outgoing mail while making drafts. In recipient details, **Rehearse sequence and view email history** shows the current sequence and the content recorded for new delivery attempts. The app can still check a connected inbox. Turning practice mode off lets due messages send again.
 
 ## Local configuration
 

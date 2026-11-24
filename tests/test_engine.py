@@ -105,6 +105,25 @@ class SequenceTests(unittest.TestCase):
         self.assertEqual("pending_review", filled["status"])
         self.assertEqual(0, self.engine.tick()["sent"])
 
+    def test_practice_preserves_queue_and_records_actual_followup_once_sending_resumes(self):
+        self.engine.profile["practice_mode"] = True
+        cid = self.prepare()
+        rehearsal = self.engine.messages(cid)
+        self.assertEqual([0, 1, 2], [message["stage"] for message in rehearsal["sequence"]])
+        self.assertEqual([], rehearsal["history"])
+        self.assertEqual(0, self.engine.tick()["sent"])
+        self.assertEqual([], self.mail.outbox)
+        self.assertEqual("ready", self.engine.preview(cid)["status"])
+        self.engine.profile["practice_mode"] = False
+        self.assertEqual(1, self.engine.tick()["sent"])
+        self.force_due(cid)
+        self.assertEqual(1, self.engine.tick()["sent"])
+        history = self.engine.messages(cid)["history"]
+        self.assertEqual([0, 1], [message["stage"] for message in history])
+        self.assertEqual(self.mail.outbox[-1][1:3], (history[-1]["subject"], history[-1]["body"]))
+        self.engine.profile["name"] = "New Sender Name"
+        self.assertEqual(history, self.engine.messages(cid)["history"])
+
     def test_calendar_uses_business_days(self):
         start = datetime(2026, 11, 20, 12).astimezone()
         first = datetime.fromisoformat(after_business_days(start, 4)).astimezone()

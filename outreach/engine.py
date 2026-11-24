@@ -13,6 +13,7 @@ from email.utils import make_msgid
 from pathlib import Path
 
 from . import compose
+from .job_signals import REPLY_SCHEMA, record_reply
 from .mailbox import Mailbox, SendRejected, address
 from .research import shared_domain
 
@@ -86,9 +87,14 @@ class Engine:
                 stage INTEGER NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS attempts_contact ON attempts(contact_id);
+            CREATE TABLE IF NOT EXISTS attempt_content(
+                message_id TEXT PRIMARY KEY REFERENCES attempts(message_id),
+                subject TEXT NOT NULL, body TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS incoming(key TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
         """)
+        self.db.executescript(REPLY_SCHEMA)
 
     def close(self):
         with self._mutex:
@@ -127,6 +133,28 @@ class Engine:
     def preview(self, contact_id):
         with self._mutex:
             return self._view(self._get(contact_id))
+
+    def messages(self, contact_id):
+        """Read recorded delivery attempts and rehearse the current outreach sequence."""
+        with self._mutex:
+            item = self._view(self._get(contact_id))
+            history = []
+            for row in self.db.execute("""SELECT a.stage,a.state,a.created_at,c.subject,c.body
+                FROM attempts a LEFT JOIN attempt_content c USING(message_id)
+                WHERE a.contact_id=? AND a.state IN ('accepted','unknown')
+                ORDER BY a.created_at""", (contact_id,)):
+                entry = dict(row)
+                if row["stage"] == 0 and row["subject"] is None and row["state"] == "accepted":
+                    # The first email's saved draft was already immutable after submission.
+                    entry.update(subject=item["subject"], body=item["body"])
+                history.append(entry)
+        sequence = []
+        if item.get("subject") and item.get("body"):
+            sequence.append({"stage": 0, "subject": item["subject"], "body": item["body"]})
+            sequence.extend({"stage": stage, "subject": "Re: " + item["subject"],
+                             "body": compose.follow_up(self.profile, item, stage)}
+                            for stage in (1, 2))
+        return {"history": history, "sequence": sequence}
 
     def company_suggestion(self, contact_id, company=None):
         """Return copyable company-level details. Reading a suggestion never enrolls a contact."""
@@ -349,6 +377,9 @@ class Engine:
              msg.key if re.fullmatch(r"<[^<>\s]+>", msg.key) else None, int(kind in ("positive", "resume", "call", "experience")),
              kind, now().isoformat(), automatic, "Delivery failed." if kind == "bounce" else "Recipient replied.",
              accepted_at, row["id"]))
+        if (status in ("replied", "stopped") and msg.sender == row["email"] and accepted_at
+                and kind not in {"opt_out", "bounce", "auto_reply"}):
+            record_reply(db, row["id"], msg.key, msg.text, now().isoformat())
         return True
 
     def _poll(self, mailbox, report):
@@ -400,6 +431,7 @@ class Engine:
             subject = item["subject"] if not stage else "Re: " + item["subject"]
             mid = make_msgid(idstring=uuid.uuid4().hex, domain=mailbox.sender.rsplit("@", 1)[1])
             db.execute("INSERT INTO attempts VALUES(?,?,?,'unknown',?)", (mid, row["id"], stage, instant))
+            db.execute("INSERT INTO attempt_content VALUES(?,?,?)", (mid, subject, body))
             # A process loss after this commit leaves a visible uncertain state, never an automatic resend.
             if stage == 3:
                 db.execute("UPDATE contacts SET auto_response_status='uncertain',next_due=NULL WHERE id=?", (row["id"],))
@@ -449,6 +481,8 @@ class Engine:
                 if stop_requested and stop_requested():
                     break
                 if not self._poll(mailbox, report) or (stop_requested and stop_requested()):
+                    break
+                if self.profile.get("practice_mode"):
                     break
                 claim = self._claim(mailbox)
                 if not claim:
